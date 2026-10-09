@@ -125,8 +125,16 @@ export class EmailService {
         html: htmlContent,
       });
 
-      console.log(`[EmailService] OTP email sent successfully to ${recipientEmail}. Message ID: ${info.messageId}`);
-      return { success: true };
+      console.log(`\n==================================================`);
+      console.log(`[EmailService] OTP email sent successfully to ${recipientEmail}`);
+      console.log(`[EmailService] 6-digit Code: ${otp}`);
+      console.log(`[EmailService] Message ID: ${info.messageId}`);
+      console.log(`==================================================\n`);
+
+      return {
+        success: true,
+        devCode: ENV.NODE_ENV !== 'production' ? otp : undefined,
+      };
     } catch (err: any) {
       console.warn(`[EmailService] SMTP error sending to ${recipientEmail}:`, err.message);
 
