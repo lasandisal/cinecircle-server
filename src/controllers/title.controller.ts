@@ -375,8 +375,12 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         ])
       : [[], [], [], []];
 
-    // Auto-refresh watch providers to ensure global providers like Netflix are present
-    if (title.tmdbId && !watchProviders.some((p) => p.service.toLowerCase().includes('netflix'))) {
+    // Auto-refresh watch providers to ensure major global providers (Netflix, Prime Video, etc.) are present
+    const hasBothNetflixAndPrime =
+      watchProviders.some((p) => p.service.toLowerCase().includes('netflix')) &&
+      watchProviders.some((p) => p.service.toLowerCase().includes('prime'));
+
+    if (title.tmdbId && (!hasBothNetflixAndPrime || watchProviders.length === 0)) {
       try {
         const freshData = await tmdbService.fetchDetails(title.tmdbId, title.type);
         if (freshData?.watchProviders && freshData.watchProviders.length > 0) {

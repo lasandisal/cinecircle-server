@@ -207,39 +207,93 @@ class TmdbService {
           photoUrl: c.profile_path ? `${TMDB_IMAGE_BASE}${c.profile_path}` : undefined,
         }));
 
-        // Parse Watch Providers across priority and global regions (including Netflix, Max, Prime, etc.)
+        // Parse Watch Providers across priority and global regions (including Netflix, Prime Video, Max, Disney+, Apple TV+, etc.)
         const providersData = data['watch/providers']?.results || {};
-        const serviceMap = new Map<string, Set<string>>();
+        const serviceMap = new Map<string, { regions: Set<string>; type: 'subscription' | 'rental' | 'purchase' }>();
+
+        const addProvider = (
+          service: string,
+          region: string,
+          type: 'subscription' | 'rental' | 'purchase' = 'subscription'
+        ) => {
+          if (!serviceMap.has(service)) {
+            serviceMap.set(service, { regions: new Set(), type });
+          }
+          serviceMap.get(service)!.regions.add(region);
+        };
 
         const priorityRegions = ['LK', 'US', 'GB', 'IN', 'AU', 'CA', 'DE', 'FR', 'JP'];
         const allRegionKeys = Array.from(new Set([...priorityRegions, ...Object.keys(providersData)]));
 
         for (const rKey of allRegionKeys) {
           const rData = providersData[rKey];
-          if (!rData || !Array.isArray(rData.flatrate)) continue;
-          for (const item of rData.flatrate) {
-            const rawName = item.provider_name;
-            if (!rawName) continue;
-            let normalized = rawName;
-            if (rawName.toLowerCase().includes('netflix')) normalized = 'Netflix';
-            else if (rawName.toLowerCase().includes('max') || rawName.toLowerCase().includes('hbo')) normalized = 'Max';
-            else if (rawName.toLowerCase().includes('disney')) normalized = 'Disney+';
-            else if (rawName.toLowerCase().includes('prime video') || rawName.toLowerCase().includes('amazon prime')) normalized = 'Prime Video';
-            else if (rawName.toLowerCase().includes('apple tv')) normalized = 'Apple TV+';
-            else if (rawName.toLowerCase().includes('hulu')) normalized = 'Hulu';
-            else if (rawName.toLowerCase().includes('paramount')) normalized = 'Paramount+';
-            else if (rawName.toLowerCase().includes('peacock')) normalized = 'Peacock';
+          if (!rData) continue;
 
-            if (!serviceMap.has(normalized)) {
-              serviceMap.set(normalized, new Set());
+          // 1. Subscription flatrate providers
+          if (Array.isArray(rData.flatrate)) {
+            for (const item of rData.flatrate) {
+              const rawName = item.provider_name || '';
+              const lower = rawName.toLowerCase();
+
+              let recognizedFamous = false;
+
+              if (lower.includes('netflix')) {
+                addProvider('Netflix', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('prime') || lower.includes('amazon')) {
+                addProvider('Prime Video', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('max') || lower.includes('hbo')) {
+                addProvider('Max', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('disney')) {
+                addProvider('Disney+', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('apple tv')) {
+                addProvider('Apple TV+', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('hulu')) {
+                addProvider('Hulu', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('paramount')) {
+                addProvider('Paramount+', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+              if (lower.includes('peacock')) {
+                addProvider('Peacock', rKey, 'subscription');
+                recognizedFamous = true;
+              }
+
+              // Other non-famous or local regional cable/broadcasters
+              if (!recognizedFamous && rawName.trim()) {
+                addProvider(rawName.trim(), rKey, 'subscription');
+              }
             }
-            serviceMap.get(normalized)!.add(rKey);
+          }
+
+          // 2. Buy/rent digital streams (check for Prime Video and Apple TV+ if not already present)
+          const digitalItems = [...(rData.buy || []), ...(rData.rent || [])];
+          for (const item of digitalItems) {
+            const rawName = item.provider_name || '';
+            const lower = rawName.toLowerCase();
+            if (lower.includes('amazon') || lower.includes('prime')) {
+              addProvider('Prime Video', rKey, 'subscription');
+            }
+            if (lower.includes('apple')) {
+              addProvider('Apple TV+', rKey, 'rental');
+            }
           }
         }
 
-        const watchProviders: { service: string; region: string; type: 'subscription' }[] = [];
-        for (const [serviceName, regionsSet] of serviceMap.entries()) {
-          const regionsArr = Array.from(regionsSet);
+        const watchProviders: { service: string; region: string; type: 'subscription' | 'rental' | 'purchase' }[] = [];
+        for (const [serviceName, entry] of serviceMap.entries()) {
+          const regionsArr = Array.from(entry.regions);
           let regionLabel = 'Global';
           if (regionsArr.includes('US') && regionsArr.includes('LK')) {
             regionLabel = 'US • LK';
@@ -256,7 +310,7 @@ class TmdbService {
           watchProviders.push({
             service: serviceName,
             region: regionLabel,
-            type: 'subscription',
+            type: entry.type,
           });
         }
 
