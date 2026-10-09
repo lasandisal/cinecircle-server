@@ -115,6 +115,8 @@ export class SeedService {
             title: dune._id,
             user: adminUser._id,
             text: 'The sound design in IMAX was absolute perfection! Greig Fraser and Hans Zimmer created a masterclass.',
+            rating: 5,
+            likesCount: 38,
             containsSpoilers: false,
           });
         }
@@ -128,7 +130,32 @@ export class SeedService {
             title: theBear._id,
             user: adminUser._id,
             text: 'Season 1 Episode 7 "Review" is twenty minutes of non-stop adrenaline. Incredible directing!',
+            rating: 5,
+            likesCount: 29,
             containsSpoilers: false,
+          });
+        }
+      }
+
+      const strangerThings = await Title.findOne({ name: 'Stranger Things' });
+      if (strangerThings) {
+        const stComment = await Comment.findOne({ title: strangerThings._id });
+        if (!stComment) {
+          await Comment.create({
+            title: strangerThings._id,
+            user: adminUser._id,
+            text: 'Running Up That Hill in S4E4 is one of the greatest television sequences of the decade. The Duffer Brothers delivered cinema-grade quality.',
+            rating: 5,
+            likesCount: 42,
+            containsSpoilers: false,
+          });
+          await Comment.create({
+            title: strangerThings._id,
+            user: adminUser._id,
+            text: 'Eddie Munson playing Metallica in the Upside Down is iconic forever.',
+            rating: 5,
+            likesCount: 27,
+            containsSpoilers: true,
           });
         }
       }

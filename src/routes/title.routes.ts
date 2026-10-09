@@ -8,6 +8,7 @@ import {
   seedTitles,
   addComment,
   getComments,
+  likeComment,
 } from '../controllers/title.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -26,5 +27,6 @@ router.post('/seed', seedTitles);
 router.get('/:titleId', getTitleDetails);
 router.get('/:titleId/comments', getComments);
 router.post('/:titleId/comments', authenticate, addComment);
+router.post('/comments/:commentId/like', likeComment);
 
 export default router;

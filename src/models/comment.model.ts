@@ -8,6 +8,8 @@ const CommentSchema = new Schema<ICommentDocument>(
     title: { type: Schema.Types.ObjectId, ref: 'Title', required: true, index: true },
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true },
+    rating: { type: Number },
+    likesCount: { type: Number, default: 0 },
     containsSpoilers: { type: Boolean, default: false },
     reported: { type: Boolean, default: false },
     hidden: { type: Boolean, default: false },

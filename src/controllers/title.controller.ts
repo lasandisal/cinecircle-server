@@ -296,10 +296,14 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
       return;
     }
 
+    const rating = req.body.rating ? Number(req.body.rating) : undefined;
+
     const comment = await Comment.create({
       title: title._id,
       user: req.user?.id,
       text: text.trim(),
+      rating,
+      likesCount: 0,
       containsSpoilers: !!containsSpoilers,
     });
 
@@ -323,6 +327,29 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
       .limit(50);
 
     sendSuccess(res, { comments }, 'Comments retrieved');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Like a discussion comment
+ */
+export const likeComment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const comment = await Comment.findByIdAndUpdate(
+      commentId,
+      { $inc: { likesCount: 1 } },
+      { new: true }
+    ).populate('user', 'name email role');
+
+    if (!comment) {
+      res.status(404).json({ success: false, error: 'Comment not found' });
+      return;
+    }
+
+    sendSuccess(res, { comment }, 'Comment liked');
   } catch (error) {
     next(error);
   }

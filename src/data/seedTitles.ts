@@ -173,6 +173,31 @@ export const SEED_TITLES: SeedTitleData[] = [
           { episodeNumber: 1, name: 'Chapter One: The Vanishing of Will Byers', summary: 'On his way home from a friend’s house, young Will sees something terrifying. Nearby, a sinister secret lurks in the depths of a government lab.', runtimeMinutes: 48 },
           { episodeNumber: 2, name: 'Chapter Two: The Weirdo on Maple Street', summary: 'Lucas, Mike and Dustin try to talk to the girl they found in the woods. Hopper questions an anxious Joyce about an unsettling phone call.', runtimeMinutes: 55 },
           { episodeNumber: 3, name: 'Chapter Three: Holly, Jolly', summary: 'An increasingly concerned Nancy looks for Barb and finds out what Jonathan’s been up to. Joyce is convinced Will is trying to talk to her.', runtimeMinutes: 51 },
+          { episodeNumber: 8, name: 'Chapter Eight: The Upside Down', summary: 'Jim Hopper and Joyce enter the Upside Down while the kids defend Eleven at Hawkins Middle School.', runtimeMinutes: 54 },
+        ],
+      },
+      {
+        seasonNumber: 2,
+        episodes: [
+          { episodeNumber: 1, name: 'Chapter One: MADMAX', summary: 'As the town preps for Halloween, a high-scoring rival shakes things up at the arcade, and a skeptical Hopper inspects a field of rotting pumpkins.', runtimeMinutes: 48 },
+          { episodeNumber: 6, name: 'Chapter Six: The Spy', summary: 'Will’s connection to a shadowy evil grows stronger, but no one’s quite sure how to stop it. Dustin and Steve forge an unlikely bond.', runtimeMinutes: 51 },
+          { episodeNumber: 9, name: 'Chapter Nine: The Gate', summary: 'Eleven makes plans to finish what she started while the survivors turn up the heat on the monstrous force holding Will hostage.', runtimeMinutes: 62 },
+        ],
+      },
+      {
+        seasonNumber: 3,
+        episodes: [
+          { episodeNumber: 1, name: 'Chapter One: Suzie, Do You Copy?', summary: 'Summer brings new jobs and nascent romance. But the mood shifts when Dustin’s radio picks up a Russian broadcast.', runtimeMinutes: 50 },
+          { episodeNumber: 4, name: 'Chapter Four: The Sauna Test', summary: 'A code red brings the gang back together to face a frighteningly familiar evil. Karen urges Nancy to keep digging.', runtimeMinutes: 52 },
+          { episodeNumber: 8, name: 'Chapter Eight: The Battle of Starcourt', summary: 'Terror reigns in the food court when the Mind Flayer comes to collect. But down below in the Russian lab, the future of the world is at stake.', runtimeMinutes: 77 },
+        ],
+      },
+      {
+        seasonNumber: 4,
+        episodes: [
+          { episodeNumber: 4, name: 'Chapter Four: Dear Billy', summary: 'Max is in grave danger and running out of time. Kate Bush’s music becomes her salvation against Vecna’s curse.', runtimeMinutes: 79 },
+          { episodeNumber: 7, name: 'Chapter Seven: The Massacre at Hawkins Lab', summary: 'Hopper braces to fight a monster in Kamchatka. Eleven pieces together memories of One and Henry Creel.', runtimeMinutes: 98 },
+          { episodeNumber: 9, name: 'Chapter Nine: The Piggyback', summary: 'With selfless hearts and Eddie Munson’s guitar solo, heroes fight from every corner of the battlefield to save Hawkins.', runtimeMinutes: 142 },
         ],
       },
     ],
@@ -245,6 +270,22 @@ export const SEED_TITLES: SeedTitleData[] = [
         episodes: [
           { episodeNumber: 1, name: 'System', summary: 'Carmy attempts to overhaul The Original Beef of Chicagoland kitchen operations amidst debts and stubborn resistance.', runtimeMinutes: 28 },
           { episodeNumber: 7, name: 'Review', summary: 'A frantic one-take look at an unmitigated disaster during lunch rush.', runtimeMinutes: 20 },
+          { episodeNumber: 8, name: 'Braciole', summary: 'Things get out of hand in the kitchen. Carmy finds an unexpected message left by his late brother Mikey.', runtimeMinutes: 47 },
+        ],
+      },
+      {
+        seasonNumber: 2,
+        episodes: [
+          { episodeNumber: 6, name: 'Fishes', summary: 'A tense, star-studded Berzatto family Christmas dinner unveils the roots of trauma and generational chaos.', runtimeMinutes: 66 },
+          { episodeNumber: 7, name: 'Forks', summary: 'Richie stages at an elite three-Michelin-star fine dining establishment and discovers his true passion for service excellence.', runtimeMinutes: 35 },
+          { episodeNumber: 10, name: 'The Bear', summary: 'Friends and family night tests the crew as Carmy accidentally locks himself inside the walk-in cooler.', runtimeMinutes: 40 },
+        ],
+      },
+      {
+        seasonNumber: 3,
+        episodes: [
+          { episodeNumber: 1, name: 'Tomorrow', summary: 'A sensory montage tracing Carmy’s obsessive journey through world-class European and American culinary institutions.', runtimeMinutes: 38 },
+          { episodeNumber: 10, name: 'Forever', summary: 'The crew gathers for an emotionally charged farewell dinner before The Chicago Tribune review drops.', runtimeMinutes: 43 },
         ],
       },
     ],

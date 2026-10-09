@@ -135,6 +135,8 @@ export interface IComment {
   title: Types.ObjectId;
   user: Types.ObjectId;
   text: string;
+  rating?: number;
+  likesCount?: number;
   containsSpoilers?: boolean;
   reported: boolean;
   hidden: boolean;
