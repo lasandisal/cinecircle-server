@@ -29,6 +29,7 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       circlesCount,
       reviewsCount,
       recentWatchedDocs,
+      recentWatchlistDocs,
       recentReviewsDocs,
       userCirclesDocs,
     ] = await Promise.all([
@@ -43,6 +44,11 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
         .populate('title', 'name posterUrl releaseYear type voteAverage runtimeMinutes')
         .sort({ watchedAt: -1, addedAt: -1 })
         .limit(12)
+        .lean(),
+      Watchlist.find({ user: targetUserId, watched: false })
+        .populate('title', 'name posterUrl releaseYear type voteAverage runtimeMinutes overview genres')
+        .sort({ addedAt: -1 })
+        .limit(18)
         .lean(),
       Comment.find({ user: targetUserId })
         .populate('title', 'name posterUrl releaseYear')
@@ -79,6 +85,7 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             reviewsCount,
           },
           recentWatched: recentWatchedDocs.filter((w) => w.title != null),
+          savedWatchlist: recentWatchlistDocs.filter((w) => w.title != null),
           recentReviews: recentReviewsDocs.filter((r) => r.title != null),
           userCircles: userCirclesDocs,
           isFollowing,
