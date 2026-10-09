@@ -165,6 +165,67 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
   }
 };
 
+/**
+ * Batch update episode synopses, titles, or stills (via Tasklet.ai agent or Admin Curator)
+ */
+export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { titleName, tmdbId, seasonNumber, episodes } = req.body;
+
+    if (!titleName && !tmdbId) {
+      return next(new AppError('titleName or tmdbId is required', 400));
+    }
+
+    const titleDoc = await Title.findOne(
+      tmdbId ? { tmdbId: Number(tmdbId) } : { name: new RegExp(`^${titleName.trim()}$`, 'i') }
+    );
+
+    if (!titleDoc) {
+      return next(new AppError('Title not found in MongoDB', 404));
+    }
+
+    const sNum = Number(seasonNumber) || 1;
+    const seasonDoc = await SeasonEpisode.findOne({ title: titleDoc._id, seasonNumber: sNum });
+
+    if (!seasonDoc) {
+      return next(new AppError(`Season ${sNum} not found for title "${titleDoc.name}"`, 404));
+    }
+
+    if (!Array.isArray(episodes) || episodes.length === 0) {
+      return next(new AppError('episodes array is required', 400));
+    }
+
+    let updatedCount = 0;
+    for (const item of episodes) {
+      const epNum = Number(item.episodeNumber);
+      if (!epNum) continue;
+
+      const ep = seasonDoc.episodes.find((e) => e.episodeNumber === epNum);
+      if (ep) {
+        if (item.summary) ep.summary = item.summary.trim();
+        if (item.name && (!ep.name || ep.name.match(/^Episode \d+$/i))) ep.name = item.name.trim();
+        if (item.stillUrl) ep.stillUrl = item.stillUrl;
+        updatedCount++;
+      }
+    }
+
+    await seasonDoc.save();
+
+    sendSuccess(
+      res,
+      {
+        titleName: titleDoc.name,
+        seasonNumber: sNum,
+        updatedCount,
+      },
+      `Successfully updated ${updatedCount} episode descriptions for "${titleDoc.name}" Season ${sNum}`,
+      200
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const moderateComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     // Skeleton: Admin/curator reviews flagged comment (hide/dismiss)

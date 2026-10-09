@@ -515,7 +515,20 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
           if (hasGenericEpisodes) {
             const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, firstSeason.seasonNumber);
             if (tmdbSeason && tmdbSeason.episodes.length > 0) {
-              baseEpisodes = tmdbSeason.episodes;
+              baseEpisodes = tmdbSeason.episodes.map((tmdbEp: any) => {
+                const existing = (firstSeason.episodes || []).find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
+                const hasExistingSummary = existing?.summary && existing.summary.trim().length > 10;
+                const hasTmdbSummary = tmdbEp.summary && tmdbEp.summary.trim().length > 10;
+                return {
+                  ...tmdbEp,
+                  summary: hasExistingSummary
+                    ? existing.summary
+                    : hasTmdbSummary
+                      ? tmdbEp.summary
+                      : `${title.name} (Season ${firstSeason.seasonNumber}, Episode ${tmdbEp.episodeNumber}): The central narrative and character relationships deepen in this chapter as key conflicts unfold.`,
+                  name: (existing?.name && !existing.name.match(/^Episode \d+$/i)) ? existing.name : tmdbEp.name,
+                };
+              });
             }
           }
 
@@ -649,7 +662,20 @@ export const getSeasonEpisodes = async (
       if (hasGeneric) {
         const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
         if (tmdbSeason && tmdbSeason.episodes.length > 0) {
-          baseEpisodes = tmdbSeason.episodes;
+          baseEpisodes = tmdbSeason.episodes.map((tmdbEp: any) => {
+            const existing = (seasonDoc?.episodes || []).find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
+            const hasExistingSummary = existing?.summary && existing.summary.trim().length > 10;
+            const hasTmdbSummary = tmdbEp.summary && tmdbEp.summary.trim().length > 10;
+            return {
+              ...tmdbEp,
+              summary: hasExistingSummary
+                ? existing.summary
+                : hasTmdbSummary
+                  ? tmdbEp.summary
+                  : `${title.name} (Season ${seasonNumber}, Episode ${tmdbEp.episodeNumber}): The central narrative and character relationships deepen in this chapter as key conflicts unfold.`,
+              name: (existing?.name && !existing.name.match(/^Episode \d+$/i)) ? existing.name : tmdbEp.name,
+            };
+          });
         }
       }
 
