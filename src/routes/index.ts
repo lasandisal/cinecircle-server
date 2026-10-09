@@ -6,6 +6,7 @@ import recommendationRoutes from './recommendation.routes';
 import sessionRoutes from './session.routes';
 import watchlistRoutes from './watchlist.routes';
 import curatorRoutes from './curator.routes';
+import aiRoutes from './ai.routes';
 
 const apiRouter = Router();
 
@@ -24,5 +25,6 @@ apiRouter.use('/recommendations', recommendationRoutes);
 apiRouter.use('/sessions', sessionRoutes);
 apiRouter.use('/watchlist', watchlistRoutes);
 apiRouter.use('/curator', curatorRoutes);
+apiRouter.use('/ai', aiRoutes);
 
 export default apiRouter;

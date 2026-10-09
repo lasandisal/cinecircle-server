@@ -10,4 +10,6 @@ export const ENV = {
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
   TMDB_API_KEY: process.env.TMDB_API_KEY || '',
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
 };
+
