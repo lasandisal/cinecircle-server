@@ -12,5 +12,11 @@ export const ENV = {
   TMDB_API_KEY: process.env.TMDB_API_KEY || '',
   TMDB_ACCESS_TOKEN: process.env.TMDB_ACCESS_TOKEN || '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+  BREVO_SMTP_HOST: process.env.BREVO_SMTP_HOST || 'smtp-relay.brevo.com',
+  BREVO_SMTP_PORT: parseInt(process.env.BREVO_SMTP_PORT || '587', 10),
+  BREVO_SMTP_LOGIN: process.env.BREVO_SMTP_LOGIN || 'hello.cinecircle@gmail.com',
+  BREVO_SMTP_KEY: process.env.BREVO_SMTP_KEY || '',
+  BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL || 'hello.cinecircle@gmail.com',
+  BREVO_SENDER_NAME: process.env.BREVO_SENDER_NAME || 'CineCircle',
 };
 

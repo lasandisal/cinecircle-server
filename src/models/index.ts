@@ -10,3 +10,4 @@ export * from './vote.model';
 export * from './watchProvider.model';
 export * from './comment.model';
 export * from './follow.model';
+export * from './otp.model';
