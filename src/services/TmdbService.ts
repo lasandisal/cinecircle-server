@@ -65,13 +65,36 @@ const GENRE_MAP: Record<number, string> = {
 
 class TmdbService {
   private apiKey: string;
+  private accessToken: string;
 
   constructor() {
     this.apiKey = ENV.TMDB_API_KEY || '';
+    this.accessToken = ENV.TMDB_ACCESS_TOKEN || '';
   }
 
   public hasApiKey(): boolean {
-    return !!this.apiKey && this.apiKey.trim().length > 0;
+    return (
+      (!!this.apiKey && this.apiKey.trim().length > 0) ||
+      (!!this.accessToken && this.accessToken.trim().length > 0)
+    );
+  }
+
+  private getRequestConfig(params: Record<string, any> = {}) {
+    const configParams: Record<string, any> = { ...params };
+    if (this.apiKey) {
+      configParams.api_key = this.apiKey;
+    }
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+    };
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+    return {
+      params: configParams,
+      headers,
+      timeout: 8000,
+    };
   }
 
   /**
@@ -87,13 +110,7 @@ class TmdbService {
 
     try {
       const endpoint = `${TMDB_BASE_URL}/trending/${mediaType}/week`;
-      const response = await axios.get(endpoint, {
-        params: {
-          api_key: this.apiKey,
-          page,
-        },
-        timeout: 6000,
-      });
+      const response = await axios.get(endpoint, this.getRequestConfig({ page }));
 
       const rawResults = response.data.results || [];
       return rawResults.map((item: any) => this.mapRawToFormatted(item));
@@ -122,15 +139,15 @@ class TmdbService {
     }
 
     try {
-      const response = await axios.get(`${TMDB_BASE_URL}/search/multi`, {
-        params: {
-          api_key: this.apiKey,
+      const endpoint = `${TMDB_BASE_URL}/search/multi`;
+      const response = await axios.get(
+        endpoint,
+        this.getRequestConfig({
           query,
           page,
           include_adult: false,
-        },
-        timeout: 6000,
-      });
+        })
+      );
 
       const results = (response.data.results || [])
         .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
@@ -155,13 +172,13 @@ class TmdbService {
 
     const tmdbType = type === 'film' ? 'movie' : 'tv';
     try {
-      const response = await axios.get(`${TMDB_BASE_URL}/${tmdbType}/${tmdbId}`, {
-        params: {
-          api_key: this.apiKey,
+      const endpoint = `${TMDB_BASE_URL}/${tmdbType}/${tmdbId}`;
+      const response = await axios.get(
+        endpoint,
+        this.getRequestConfig({
           append_to_response: 'credits,watch/providers',
-        },
-        timeout: 6000,
-      });
+        })
+      );
 
       const data = response.data;
       const isMovie = tmdbType === 'movie';

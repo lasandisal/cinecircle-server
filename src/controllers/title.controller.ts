@@ -162,13 +162,6 @@ export const searchTitles = async (req: Request, res: Response, next: NextFuncti
 
     let titles = await Title.find(filter).limit(10).lean();
 
-    if (titles.length === 0) {
-      // Search TMDB live
-      const tmdbResults = await tmdbService.searchTitles(q);
-      sendSuccess(res, { titles: tmdbResults }, 'Titles retrieved from TMDB search');
-      return;
-    }
-
     const titleIds = titles.map((t) => t._id);
     const providers = await WatchProvider.find({ title: { $in: titleIds } }).lean();
     const providerMap = new Map<string, any[]>();
@@ -178,12 +171,29 @@ export const searchTitles = async (req: Request, res: Response, next: NextFuncti
       providerMap.get(key)!.push(p);
     }
 
-    const enriched = titles.map((t) => ({
+    const localEnriched = titles.map((t) => ({
       ...t,
       watchProviders: providerMap.get(t._id.toString()) || [],
     }));
 
-    sendSuccess(res, { titles: enriched }, 'Titles found');
+    // If TMDB key is available, supplement with live TMDB results
+    if (tmdbService.hasApiKey()) {
+      try {
+        const tmdbResults = await tmdbService.searchTitles(q);
+        const existingTmdbIds = new Set(titles.map((t) => t.tmdbId));
+        const filteredTmdb = tmdbResults.filter((r) => !existingTmdbIds.has(r.tmdbId));
+        sendSuccess(
+          res,
+          { titles: [...localEnriched, ...filteredTmdb].slice(0, 15) },
+          'Titles retrieved (local DB + TMDB live)'
+        );
+        return;
+      } catch (err: any) {
+        console.warn('[searchTitles] TMDB live search failed, returning local:', err.message);
+      }
+    }
+
+    sendSuccess(res, { titles: localEnriched }, 'Titles found');
   } catch (error) {
     next(error);
   }
@@ -223,16 +233,48 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // If not found in DB, try fetching directly from TMDB service
+    // If not found in DB, try fetching directly from TMDB service and save to MongoDB
     if (!title) {
       const tmdbIdNum = parseInt(titleId, 10);
       if (!isNaN(tmdbIdNum)) {
         const tmdbData = await tmdbService.fetchDetails(tmdbIdNum, 'film');
         if (tmdbData) {
-          sendSuccess(res, { title: tmdbData }, 'Title details retrieved from TMDB');
-          return;
+          try {
+            const created = await Title.create({
+              tmdbId: tmdbData.tmdbId,
+              name: tmdbData.name,
+              type: tmdbData.type,
+              genres: tmdbData.genres,
+              synopsis: tmdbData.synopsis,
+              runtimeMinutes: tmdbData.runtimeMinutes,
+              posterUrl: tmdbData.posterUrl,
+              backdropUrl: tmdbData.backdropUrl,
+              releaseYear: tmdbData.releaseYear,
+              voteAverage: tmdbData.voteAverage,
+              moodTags: tmdbData.moodTags,
+              cast: tmdbData.cast,
+            });
+
+            if (tmdbData.watchProviders && tmdbData.watchProviders.length > 0) {
+              const providerDocs = tmdbData.watchProviders.map((wp) => ({
+                title: created._id,
+                service: wp.service,
+                region: wp.region,
+                type: wp.type,
+              }));
+              await WatchProvider.insertMany(providerDocs);
+            }
+
+            title = created.toObject();
+          } catch (dbErr) {
+            // Handle race conditions or duplicate key error
+            title = (await Title.findOne({ tmdbId: tmdbIdNum }).lean()) || tmdbData;
+          }
         }
       }
+    }
+
+    if (!title) {
       res.status(404).json({ success: false, error: 'Title not found' });
       return;
     }
