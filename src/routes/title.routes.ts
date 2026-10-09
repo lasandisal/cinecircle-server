@@ -14,10 +14,14 @@ import {
   voteCommentPoll,
   searchMusic,
   addTitleSoundtrack,
+  getFeedActivity,
 } from '../controllers/title.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
+
+// Feed activity
+router.get('/feed', getFeedActivity);
 
 // Music search for soundtrack discovery
 router.get('/music/search', searchMusic);

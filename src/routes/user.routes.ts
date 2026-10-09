@@ -4,11 +4,13 @@ import {
   updateTasteProfile,
   updateSubscribedServices,
   toggleFollow,
+  getUserSuggestions,
 } from '../controllers/user.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
+router.get('/suggestions', optionalAuthenticate, getUserSuggestions);
 router.get('/:userId/profile', authenticate, getProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);

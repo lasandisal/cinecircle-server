@@ -40,6 +40,30 @@ export const authenticate = (req: IAuthRequest, res: Response, next: NextFunctio
 };
 
 /**
+ * Optional Authentication Middleware
+ * Populates req.user if a valid token is provided, but does not block guests.
+ */
+export const optionalAuthenticate = (req: IAuthRequest, res: Response, next: NextFunction): void => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+    };
+  } catch {
+    // Proceed as unauthenticated guest
+  }
+  next();
+};
+
+/**
  * Role-Based Access Control (RBAC) Middleware
  * Restricts access to specific user roles (e.g. 'admin').
  */

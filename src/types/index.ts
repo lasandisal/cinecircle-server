@@ -114,6 +114,7 @@ export interface ISoundtrack {
 
 export interface ISession {
   _id: Types.ObjectId;
+  name?: string;
   host: Types.ObjectId;
   joinCode: string;
   participants: Types.ObjectId[];
