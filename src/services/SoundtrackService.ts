@@ -166,6 +166,18 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'Fresh Fresh', artist: 'Florence + the Machine', episodeRef: 'Season 1 Pilot Ending', popularityRank: 3 },
     { songName: 'Bones', artist: 'MS MR', episodeRef: 'Season 4 Episode 12', popularityRank: 4 },
   ],
+  lucifer: [
+    { songName: 'Being Evil Has a Price', artist: 'Heavy Young Heathens', episodeRef: 'Main Title Opening Theme', popularityRank: 1 },
+    { songName: 'Creep', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 4 Episode 1 - Lux Piano Solo', popularityRank: 2 },
+    { songName: 'Sinnerman', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 1 Episode 6 - Lux Piano Climax', popularityRank: 3 },
+    { songName: 'All Along the Watchtower', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 2 Episode 1 - Amenadiel & Lucifer Piano Duet', popularityRank: 4 },
+    { songName: "Ain't No Rest for the Wicked", artist: 'Cage the Elephant', episodeRef: 'Pilot Episode - Lucifer Driving into LA', popularityRank: 5 },
+    { songName: 'Unshaken', artist: "D'Angelo", episodeRef: 'Season 4 Episode 1 - Closing Montage', popularityRank: 6 },
+    { songName: 'My Love Will Never Die', artist: 'Claire Wyndham', episodeRef: "Season 4 Finale - Lucifer & Chloe's Sacrifice", popularityRank: 7 },
+    { songName: 'Wicked Game', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 5 Episode 10 - Lux Performance', popularityRank: 8 },
+    { songName: 'I Will Survive', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 3 Episode 17 - Axara & Lucifer Duet', popularityRank: 9 },
+    { songName: 'Sanctuary', artist: 'Welshly Arms', episodeRef: 'Season 4 Episode 10 - Demon Showdown', popularityRank: 10 },
+  ],
 };
 
 export class SoundtrackService {
@@ -233,13 +245,14 @@ export class SoundtrackService {
   /**
    * Universal automated soundtrack discovery:
    * 1. Consults Wikipedia to find the exact soundtrack album / series music articles.
-   * 2. Finds the authentic OST album on Apple Music and extracts real tracklist, audio previews & artwork.
-   * 3. If no iTunes album exists, parses the track listing from Wikipedia wikitext and enriches with iTunes audio.
-   * 4. Enforces strict title verification so unrelated albums (e.g. La La Land) are NEVER matched.
+   * 2. Formulates queries tailored to media type (TV vs Film, e.g. "Cast", "Seasons", "Original Television Soundtrack").
+   * 3. Disqualifies cross-medium false positives (e.g. movies named "Lucifer" cannot match TV show "Lucifer").
+   * 4. Enforces strict title verification so unrelated albums are NEVER matched.
    */
   public static async discoverAlbumSoundtrack(
     titleName: string,
-    originalName?: string
+    originalName?: string,
+    mediaType?: 'film' | 'tv'
   ): Promise<SoundtrackTrack[]> {
     const cleanTitle = titleName.trim();
     const titleLower = cleanTitle.toLowerCase();
@@ -254,11 +267,12 @@ export class SoundtrackService {
     // 1. Discover soundtrack album articles via Wikipedia Search API
     let wikiCandidates: string[] = [];
     try {
+      const searchSuffix = mediaType === 'tv' ? 'TV series soundtrack album' : 'soundtrack album OR music';
       const wRes = await axios.get('https://en.wikipedia.org/w/api.php', {
         params: {
           action: 'query',
           list: 'search',
-          srsearch: `${cleanTitle} soundtrack album OR music`,
+          srsearch: `${cleanTitle} ${searchSuffix}`,
           format: 'json',
         },
         headers: { 'User-Agent': 'CineCircleRAD/1.0 (contact@cinecircle.app)' },
@@ -278,20 +292,40 @@ export class SoundtrackService {
       // Continue even if Wikipedia API fails or times out
     }
 
-    // 2. Build prioritized album search queries
-    const queries = [
-      ...wikiCandidates.slice(0, 3),
-      originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
-      originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
-      `${cleanTitle} (Original Television Soundtrack)`,
-      `${cleanTitle} (Original Motion Picture Soundtrack)`,
-      `${cleanTitle} Original Soundtrack`,
-      `${cleanTitle} Original Series Soundtrack`,
-      `${cleanTitle} Soundtrack`,
-      `${cleanTitle} OST`,
-      `Music from ${cleanTitle}`,
-      cleanTitle,
-    ].filter(Boolean) as string[];
+    // 2. Build prioritized album search queries tailored specifically by media type
+    let queries: string[] = [];
+
+    if (mediaType === 'tv') {
+      queries = [
+        `${cleanTitle} Cast`,
+        `${cleanTitle}: Season`,
+        `${cleanTitle} Season 1`,
+        ...wikiCandidates.slice(0, 3),
+        originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
+        originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
+        `${cleanTitle} (Original Television Soundtrack)`,
+        `${cleanTitle} Original Series Soundtrack`,
+        `${cleanTitle} (Music from the TV Series)`,
+        `${cleanTitle} (Music from the Series)`,
+        `Music from ${cleanTitle}`,
+        `${cleanTitle} Soundtrack`,
+        `${cleanTitle} OST`,
+        cleanTitle,
+      ].filter(Boolean) as string[];
+    } else {
+      queries = [
+        ...wikiCandidates.slice(0, 3),
+        originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
+        originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
+        `${cleanTitle} (Original Motion Picture Soundtrack)`,
+        `${cleanTitle} Original Soundtrack`,
+        `${cleanTitle} Motion Picture Score`,
+        `${cleanTitle} Soundtrack`,
+        `${cleanTitle} OST`,
+        `Music from the Motion Picture ${cleanTitle}`,
+        cleanTitle,
+      ].filter(Boolean) as string[];
+    }
 
     // 3. Search iTunes for a verified album
     for (const q of queries) {
@@ -307,6 +341,16 @@ export class SoundtrackService {
           const artist = (a.artistName || '').toLowerCase();
           const count = a.trackCount || 0;
 
+          // Disqualify cross-medium false positives:
+          // A TV show must NEVER accept a "Motion Picture" / "Film" soundtrack
+          if (mediaType === 'tv' && (name.includes('motion picture') || name.includes('movie soundtrack'))) {
+            return false;
+          }
+          // A Film must NEVER accept an "Original Television Soundtrack" / "Series Soundtrack"
+          if (mediaType === 'film' && (name.includes('television') || name.includes('series soundtrack') || name.includes('season '))) {
+            return false;
+          }
+
           const isSoundtrack =
             name.includes('soundtrack') ||
             name.includes('ost') ||
@@ -316,6 +360,7 @@ export class SoundtrackService {
             name.includes('original') ||
             artist.includes(titleLower) ||
             artist.includes('soundtrack') ||
+            artist.includes('cast') ||
             artist.includes('various artists');
 
           const mentionsTitle =
@@ -432,7 +477,8 @@ export class SoundtrackService {
    */
   public static async getSoundtracksForTitle(
     titleName: string,
-    originalName?: string
+    originalName?: string,
+    mediaType?: 'film' | 'tv'
   ): Promise<SoundtrackTrack[]> {
     const norm = titleName.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 
@@ -457,7 +503,7 @@ export class SoundtrackService {
 
         // Also attempt to discover and merge any additional album tracks without duplicates
         try {
-          const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName);
+          const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType);
           if (albumTracks.length > 0) {
             const seen = new Set(enriched.map((e) => e.songName.toLowerCase().trim()));
             const additional = albumTracks.filter(
@@ -475,7 +521,7 @@ export class SoundtrackService {
 
     // 2. Automated Universal Album Discovery (Authentic OST albums across KDramas, Films, Western TV)
     try {
-      const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName);
+      const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType);
       if (albumTracks.length > 0) {
         return albumTracks;
       }
@@ -483,13 +529,20 @@ export class SoundtrackService {
       console.warn(`[SoundtrackService] Album discovery error for "${titleName}":`, albumErr.message);
     }
 
-    // 3. Fallback: Multi-angle iTunes song search (strictly matching title)
+    // 3. Fallback: Multi-angle iTunes song search (strictly matching title and medium)
     try {
-      const queries = [
-        `${titleName} soundtrack`,
-        `${titleName} Cast`,
-        `${titleName} Original Series Soundtrack`,
-      ];
+      const queries =
+        mediaType === 'tv'
+          ? [
+              `${titleName} Cast`,
+              `${titleName} TV series soundtrack`,
+              `${titleName} Original Series Soundtrack`,
+            ]
+          : [
+              `${titleName} soundtrack`,
+              `${titleName} Original Motion Picture Soundtrack`,
+              `${titleName} Motion Picture Score`,
+            ];
 
       const searchPromises = queries.map((q) =>
         axios
@@ -514,6 +567,10 @@ export class SoundtrackService {
 
         const coll = (item.collectionName || '').toLowerCase();
         const art = (item.artistName || '').toLowerCase();
+
+        // Reject cross-medium false positives
+        if (mediaType === 'tv' && coll.includes('motion picture')) continue;
+        if (mediaType === 'film' && coll.includes('television')) continue;
 
         // Check if track is genuinely related to this movie/series
         const isRelated = coll.includes(titleLower) || art.includes(titleLower);
