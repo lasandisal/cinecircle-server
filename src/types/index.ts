@@ -102,7 +102,10 @@ export interface ISoundtrack {
   artist: string;
   episodeRef?: string;
   popularityRank: number;
-  addedBy: Types.ObjectId;
+  previewUrl?: string;
+  albumArtUrl?: string;
+  spotifyUrl?: string;
+  addedBy?: Types.ObjectId;
 }
 
 export interface ISession {

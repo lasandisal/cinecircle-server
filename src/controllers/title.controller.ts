@@ -8,6 +8,7 @@ import {
 } from '../models';
 import { tmdbService } from '../services/TmdbService';
 import { SeedService } from '../services/SeedService';
+import { SoundtrackService } from '../services/SoundtrackService';
 import { sendSuccess } from '../utils/response';
 import type { IAuthRequest } from '../types';
 import mongoose from 'mongoose';
@@ -454,9 +455,32 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // Curated soundtracks if none stored
-    const finalSoundtracks =
-      soundtracks.length > 0 ? soundtracks : getCuratedSoundtracks(title.name);
+    // Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
+    let finalSoundtracks = soundtracks;
+    if (soundtracks.length === 0 || !soundtracks.some((s) => s.previewUrl)) {
+      try {
+        const dynamicTracks = await SoundtrackService.getSoundtracksForTitle(title.name);
+        if (dynamicTracks.length > 0) {
+          finalSoundtracks = dynamicTracks as any;
+          if (titleObjId) {
+            await Soundtrack.deleteMany({ title: titleObjId });
+            const docs = dynamicTracks.map((dt) => ({
+              title: titleObjId,
+              songName: dt.songName,
+              artist: dt.artist,
+              episodeRef: dt.episodeRef,
+              popularityRank: dt.popularityRank,
+              previewUrl: dt.previewUrl,
+              albumArtUrl: dt.albumArtUrl,
+              spotifyUrl: dt.spotifyUrl,
+            }));
+            await Soundtrack.insertMany(docs);
+          }
+        }
+      } catch (stErr: any) {
+        console.warn('[getTitleDetails] Error discovering soundtracks:', stErr.message);
+      }
+    }
 
     // Group replies under top-level parent comments
     const parentComments: any[] = [];
@@ -535,7 +559,7 @@ export const getSeasonEpisodes = async (
     if (hasGeneric && title.tmdbId) {
       const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
       if (tmdbSeason && tmdbSeason.episodes.length > 0) {
-        const songs = getCuratedSoundtracks(title.name);
+        const songs = await SoundtrackService.getSoundtracksForTitle(title.name);
         const enriched = tmdbSeason.episodes.map((ep, idx) => ({
           ...ep,
           featuredSong: songs[idx % songs.length]

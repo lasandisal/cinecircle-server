@@ -10,7 +10,10 @@ const SoundtrackSchema = new Schema<ISoundtrackDocument>(
     artist: { type: String, required: true },
     episodeRef: { type: String },
     popularityRank: { type: Number, default: 0 },
-    addedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    previewUrl: { type: String },
+    albumArtUrl: { type: String },
+    spotifyUrl: { type: String },
+    addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );
