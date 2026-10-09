@@ -351,6 +351,14 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
     const titleNameLower = title.name.toLowerCase();
     const isRiverdale = titleNameLower.includes('riverdale');
     const isBoysOverFlowers = titleNameLower.includes('boys over flowers');
+    const isGossipGirl = titleNameLower.includes('gossip girl');
+
+    // Detect mismatched soundtracks (e.g. Gossip Girl having La La Land, or shows with completely unrelated albums)
+    const isMismatched =
+      (isGossipGirl && soundtracks.some((s) => s.songName.includes('Another Day of Sun') || s.artist.includes('La La Land'))) ||
+      (!titleNameLower.includes('la la land') && soundtracks.some((s) => s.artist.includes('La La Land Cast'))) ||
+      (isBoysOverFlowers && !soundtracks.some((s) => s.songName.includes('파라다이스'))) ||
+      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america')));
 
     // Detect if existing tracks are naive keyword matches (e.g. tracks repeating the title name instead of real OST tracks)
     const matchingTitleCount = soundtracks.filter((s) =>
@@ -362,8 +370,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       soundtracks.length === 0 ||
       !soundtracks.some((s) => s.previewUrl) ||
       isNaiveMatchesOnly ||
-      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america'))) ||
-      (isBoysOverFlowers && !soundtracks.some((s) => s.songName.includes('파라다이스')));
+      isMismatched;
 
     if (needsRefresh) {
       try {
@@ -400,8 +407,17 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         !firstSeason.episodes ||
         firstSeason.episodes.length === 0 ||
         firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
+      const hasMismatchedEpisodeSong = firstSeason.episodes?.some(
+        (e: any) =>
+          e.featuredSong &&
+          ((titleNameLower.includes('gossip girl') && (e.featuredSong.songName?.includes('Another Day of Sun') || e.featuredSong.artist?.includes('La La Land'))) ||
+           (!titleNameLower.includes('la la land') && e.featuredSong.artist?.includes('La La Land Cast')))
+      );
+
       const needsSongRefresh =
+        needsRefresh ||
         hasGenericEpisodes ||
+        hasMismatchedEpisodeSong ||
         firstSeason.episodes.some(
           (e: any) =>
             !e.featuredSong ||
@@ -531,8 +547,17 @@ export const getSeasonEpisodes = async (
       seasonDoc.episodes.length === 0 ||
       seasonDoc.episodes.some((e: any) => e.name && e.name.match(/^Episode \d+$/i));
 
+    const titleNameLower = title.name.toLowerCase();
+    const hasMismatchedSongs = seasonDoc?.episodes?.some(
+      (e: any) =>
+        e.featuredSong &&
+        ((titleNameLower.includes('gossip girl') && (e.featuredSong.songName?.includes('Another Day of Sun') || e.featuredSong.artist?.includes('La La Land'))) ||
+         (!titleNameLower.includes('la la land') && e.featuredSong.artist?.includes('La La Land Cast')))
+    );
+
     const needsSongEnrichment =
       hasGeneric ||
+      hasMismatchedSongs ||
       (seasonDoc?.episodes?.some(
         (e: any) =>
           !e.featuredSong ||

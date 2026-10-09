@@ -106,6 +106,66 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'You Want It Darker', artist: 'Leonard Cohen', episodeRef: "Tommy Shelby's Solitary Reflections", popularityRank: 2 },
     { songName: 'Lazarus', artist: 'David Bowie', episodeRef: 'Season 3 Dramatic Climactic Sequence', popularityRank: 3 },
   ],
+  gossip_girl: [
+    { songName: 'Whatcha Say', artist: 'Jason Derulo', episodeRef: 'Season 3 Episode 11 - The Iconic Thanksgiving Dinner Climax', popularityRank: 1 },
+    { songName: 'Apologize', artist: 'Timbaland & OneRepublic', episodeRef: 'Season 1 Episode 10 - Dan & Serena Debutante Ball', popularityRank: 2 },
+    { songName: 'With Me', artist: 'Sum 41', episodeRef: 'Season 1 Episode 7 - Chuck & Blair Limo Scene', popularityRank: 3 },
+    { songName: 'Young Folks', artist: 'Peter Bjorn and John', episodeRef: 'Pilot - Serena Arrives at Grand Central', popularityRank: 4 },
+    { songName: 'Rolling in the Deep', artist: 'Adele', episodeRef: 'Season 4 Finale - Blair & Chuck / Dan Confrontation', popularityRank: 5 },
+    { songName: 'Sour Cherry', artist: 'The Kills', episodeRef: 'Season 1 - OMFGG Album Opening', popularityRank: 6 },
+    { songName: 'Paparazzi', artist: 'Lady Gaga', episodeRef: 'Season 3 Episode 4 - Secret Society', popularityRank: 7 },
+    { songName: 'Video Games', artist: 'Lana Del Rey', episodeRef: "Season 5 Episode 6 - Chuck's Apology to Blair", popularityRank: 8 },
+    { songName: 'Three Wishes', artist: 'The Pierces', episodeRef: "Season 1 Episode 3 - Blair's Sleepover", popularityRank: 9 },
+    { songName: 'Do You Wanna', artist: 'The Kooks', episodeRef: 'Season 1 - OMFGG Album', popularityRank: 10 },
+  ],
+  greys_anatomy: [
+    { songName: 'Chasing Cars', artist: 'Snow Patrol', episodeRef: 'Season 2 Finale - Denny Duquette Climax', popularityRank: 1 },
+    { songName: 'How to Save a Life', artist: 'The Fray', episodeRef: 'Season 2 Episode 21 - Iconic ER Anthem', popularityRank: 2 },
+    { songName: 'The Story', artist: 'Brandi Carlile', episodeRef: "Season 7 - Callie's Recovery", popularityRank: 3 },
+    { songName: 'Breathe (2 AM)', artist: 'Anna Nalick', episodeRef: 'Season 2 Episode 17 - Bomb in the OR', popularityRank: 4 },
+    { songName: 'Where Does the Good Go', artist: 'Tegan and Sara', episodeRef: 'Season 10 Finale - Meredith & Cristina Final Dance', popularityRank: 5 },
+    { songName: 'Cosy in the Rocket', artist: 'Psapp', episodeRef: 'Main Title Theme', popularityRank: 6 },
+  ],
+  the_oc: [
+    { songName: 'California', artist: 'Phantom Planet', episodeRef: 'Iconic Main Title Theme', popularityRank: 1 },
+    { songName: 'Hide and Seek', artist: 'Imogen Heap', episodeRef: 'Season 2 Finale - Marissa Shoots Trey', popularityRank: 2 },
+    { songName: 'Hallelujah', artist: 'Jeff Buckley', episodeRef: 'Season 1 Finale - Ryan Leaves Newport', popularityRank: 3 },
+    { songName: 'Forever Young', artist: 'Youth Group', episodeRef: 'Season 3 Episode 16 - Sadie & Ryan Dance', popularityRank: 4 },
+    { songName: 'Paint the Silence', artist: 'South', episodeRef: 'Season 1 Model Home Fire', popularityRank: 5 },
+  ],
+  gilmore_girls: [
+    { songName: 'Where You Lead', artist: 'Carole King & Louise Goffin', episodeRef: 'Opening Theme Song', popularityRank: 1 },
+    { songName: 'Reflecting Light', artist: 'Sam Phillips', episodeRef: 'Season 4 Finale - Luke & Lorelai First Dance', popularityRank: 2 },
+    { songName: 'There She Goes', artist: 'The La’s', episodeRef: 'Pilot - Lorelai Walking Through Stars Hollow', popularityRank: 3 },
+    { songName: 'Earn Enough for Us', artist: 'XTC', episodeRef: "Season 3 Luke's Diner Scene", popularityRank: 4 },
+    { songName: 'Know Your Onion!', artist: 'The Shins', episodeRef: 'Season 1 Chilton Hallway', popularityRank: 5 },
+  ],
+  skins: [
+    { songName: 'Wild World', artist: 'Cat Stevens', episodeRef: 'Season 1 Finale - Sid & Cast Sing-along', popularityRank: 1 },
+    { songName: 'Standing in the Way of Control', artist: 'Gossip', episodeRef: 'Season 1 Episode 1 - Opening House Party', popularityRank: 2 },
+    { songName: 'Alice Practice', artist: 'Crystal Castles', episodeRef: 'Season 2 Episode 3 - Club Scene', popularityRank: 3 },
+    { songName: 'Cat Chew', artist: 'Fat Segal', episodeRef: 'Main Title & Ambient Theme', popularityRank: 4 },
+  ],
+  suits: [
+    { songName: 'Greenback Boogie', artist: 'Ima Robot', episodeRef: 'Iconic Main Opening Theme', popularityRank: 1 },
+    { songName: 'Short Change Hero', artist: 'The Heavy', episodeRef: 'Season 2 Episode 10 - High Stakes Climax', popularityRank: 2 },
+    { songName: 'Looking Too Closely', artist: 'Fink', episodeRef: 'Season 4 Mid-Season Finale', popularityRank: 3 },
+    { songName: 'Love Me Again', artist: 'John Newman', episodeRef: 'Season 3 Episode 1', popularityRank: 4 },
+    { songName: 'Gold on the Ceiling', artist: 'The Black Keys', episodeRef: 'Season 1 Harvey Winning Montage', popularityRank: 5 },
+  ],
+  one_tree_hill: [
+    { songName: 'I Don’t Want to Be', artist: 'Gavin DeGraw', episodeRef: 'Iconic Opening Theme', popularityRank: 1 },
+    { songName: 'Hear You Me', artist: 'Jimmy Eat World', episodeRef: 'Season 3 Episode 16 - School Memorial Service', popularityRank: 2 },
+    { songName: 'Hands Down', artist: 'Dashboard Confessional', episodeRef: 'Season 1 - Ravens Victory Party', popularityRank: 3 },
+    { songName: 'The Mixed Tape', artist: 'Jack’s Mannequin', episodeRef: "Season 3 Episode 15 - Peyton's Studio", popularityRank: 4 },
+    { songName: 'Halo', artist: 'Bethany Joy Lenz', episodeRef: 'Season 3 Tour Performance', popularityRank: 5 },
+  ],
+  pretty_little_liars: [
+    { songName: 'Secret', artist: 'The Pierces', episodeRef: 'Iconic Main Theme - Got a secret, can you keep it?', popularityRank: 1 },
+    { songName: 'Hands of Time', artist: 'Rachel Diggs', episodeRef: "Season 1 Episode 1 - Alison's Memorial", popularityRank: 2 },
+    { songName: 'Fresh Fresh', artist: 'Florence + the Machine', episodeRef: 'Season 1 Pilot Ending', popularityRank: 3 },
+    { songName: 'Bones', artist: 'MS MR', episodeRef: 'Season 4 Episode 12', popularityRank: 4 },
+  ],
 };
 
 export class SoundtrackService {
@@ -172,97 +232,194 @@ export class SoundtrackService {
 
   /**
    * Universal automated soundtrack discovery:
-   * Finds the official OST / Soundtrack album on Apple Music and extracts
-   * the authentic tracklist with real song titles, artists, 30s audio previews, and album art.
+   * 1. Consults Wikipedia to find the exact soundtrack album / series music articles.
+   * 2. Finds the authentic OST album on Apple Music and extracts real tracklist, audio previews & artwork.
+   * 3. If no iTunes album exists, parses the track listing from Wikipedia wikitext and enriches with iTunes audio.
+   * 4. Enforces strict title verification so unrelated albums (e.g. La La Land) are NEVER matched.
    */
   public static async discoverAlbumSoundtrack(
     titleName: string,
     originalName?: string
   ): Promise<SoundtrackTrack[]> {
     const cleanTitle = titleName.trim();
+    const titleLower = cleanTitle.toLowerCase();
+    const origLower = (originalName || '').toLowerCase().trim();
+
+    // Primary significant words for verification (ignore stop words)
+    const titleWords = titleLower
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !['the', 'and', 'for', 'from', 'with', 'part'].includes(w));
+
+    // 1. Discover soundtrack album articles via Wikipedia Search API
+    let wikiCandidates: string[] = [];
+    try {
+      const wRes = await axios.get('https://en.wikipedia.org/w/api.php', {
+        params: {
+          action: 'query',
+          list: 'search',
+          srsearch: `${cleanTitle} soundtrack album OR music`,
+          format: 'json',
+        },
+        headers: { 'User-Agent': 'CineCircleRAD/1.0 (contact@cinecircle.app)' },
+        timeout: 4000,
+      });
+      const items = wRes.data?.query?.search || [];
+      wikiCandidates = items
+        .map((i: any) => i.title as string)
+        .filter((wTitle: string) => {
+          const wLower = wTitle.toLowerCase();
+          return (
+            wLower.includes(titleLower) ||
+            (titleWords.length > 0 && titleWords.some((w) => wLower.includes(w)))
+          );
+        });
+    } catch {
+      // Continue even if Wikipedia API fails or times out
+    }
+
+    // 2. Build prioritized album search queries
     const queries = [
-      originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
+      ...wikiCandidates.slice(0, 3),
       originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
-      `${cleanTitle} Original Soundtrack`,
+      originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
       `${cleanTitle} (Original Television Soundtrack)`,
       `${cleanTitle} (Original Motion Picture Soundtrack)`,
-      `${cleanTitle} OST`,
+      `${cleanTitle} Original Soundtrack`,
       `${cleanTitle} Original Series Soundtrack`,
       `${cleanTitle} Soundtrack`,
-      `${cleanTitle} Music from the Motion Picture`,
-      `${cleanTitle} Music from the Series`,
+      `${cleanTitle} OST`,
+      `Music from ${cleanTitle}`,
+      cleanTitle,
     ].filter(Boolean) as string[];
 
-    const titleLower = cleanTitle.toLowerCase();
-    const origLower = (originalName || '').toLowerCase();
-
+    // 3. Search iTunes for a verified album
     for (const q of queries) {
       try {
         const res = await axios.get('https://itunes.apple.com/search', {
-          params: {
-            term: q,
-            entity: 'album',
-            limit: 8,
-          },
+          params: { term: q, entity: 'album', limit: 8 },
           timeout: 4000,
         });
 
         const albums = res.data?.results || [];
+        const matchedAlbum = albums.find((a: any) => {
+          const name = (a.collectionName || '').toLowerCase();
+          const artist = (a.artistName || '').toLowerCase();
+          const count = a.trackCount || 0;
 
-        // Find an album representing the soundtrack with > 2 tracks (not a 1-song single)
-        const matchedAlbum =
-          albums.find((a: any) => {
-            const name = (a.collectionName || '').toLowerCase();
-            const artist = (a.artistName || '').toLowerCase();
-            const count = a.trackCount || 0;
+          const isSoundtrack =
+            name.includes('soundtrack') ||
+            name.includes('ost') ||
+            name.includes('score') ||
+            name.includes('music from') ||
+            name.includes('series') ||
+            name.includes('original') ||
+            artist.includes(titleLower) ||
+            artist.includes('soundtrack') ||
+            artist.includes('various artists');
 
-            const isSoundtrack =
-              name.includes('soundtrack') ||
-              name.includes('ost') ||
-              name.includes('score') ||
-              name.includes('music from') ||
-              artist.includes(titleLower);
+          const mentionsTitle =
+            name.includes(titleLower) ||
+            artist.includes(titleLower) ||
+            (origLower && (name.includes(origLower) || artist.includes(origLower))) ||
+            (titleWords.length > 0 && titleWords.every((w) => name.includes(w) || artist.includes(w)));
 
-            const mentionsTitle =
-              name.includes(titleLower) ||
-              artist.includes(titleLower) ||
-              (origLower && (name.includes(origLower) || artist.includes(origLower)));
-
-            return isSoundtrack && mentionsTitle && count > 2;
-          }) ||
-          albums.find((a: any) => {
-            const name = (a.collectionName || '').toLowerCase();
-            const count = a.trackCount || 0;
-            return (name.includes('soundtrack') || name.includes('ost')) && count > 3;
-          });
+          return isSoundtrack && mentionsTitle && count > 2;
+        });
 
         if (matchedAlbum) {
           const lookup = await axios.get('https://itunes.apple.com/lookup', {
-            params: {
-              id: matchedAlbum.collectionId,
-              entity: 'song',
-              limit: 25,
-            },
+            params: { id: matchedAlbum.collectionId, entity: 'song', limit: 25 },
             timeout: 4000,
           });
 
           const rawTracks = (lookup.data?.results || []).slice(1);
           if (rawTracks.length > 0) {
-            const tracks: SoundtrackTrack[] = rawTracks.map((item: any, idx: number) => ({
-              songName: item.trackName || 'Untitled Track',
-              artist: item.artistName || matchedAlbum.artistName,
-              episodeRef: `From: ${matchedAlbum.collectionName}`,
-              popularityRank: item.trackNumber || idx + 1,
-              previewUrl: item.previewUrl || undefined,
-              albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
-              spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
-            }));
-
-            return tracks.slice(0, 16);
+            return rawTracks
+              .map((item: any, idx: number) => ({
+                songName: item.trackName || 'Untitled Track',
+                artist: item.artistName || matchedAlbum.artistName,
+                episodeRef: `From: ${matchedAlbum.collectionName}`,
+                popularityRank: item.trackNumber || idx + 1,
+                previewUrl: item.previewUrl || undefined,
+                albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
+                spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
+              }))
+              .slice(0, 16);
           }
         }
       } catch {
-        // try next query
+        // try next candidate
+      }
+    }
+
+    // 4. Fallback: Parse Wikipedia wikitext track listings if album wasn't on iTunes
+    for (const pageTitle of wikiCandidates.slice(0, 2)) {
+      try {
+        const pRes = await axios.get('https://en.wikipedia.org/w/api.php', {
+          params: {
+            action: 'parse',
+            page: pageTitle,
+            prop: 'wikitext',
+            format: 'json',
+          },
+          headers: { 'User-Agent': 'CineCircleRAD/1.0 (contact@cinecircle.app)' },
+          timeout: 4000,
+        });
+        const text = pRes.data?.parse?.wikitext?.['*'] || '';
+
+        const titleRegex = /\|\s*title(\d*)\s*=\s*([^|\n]+)/gi;
+        let match;
+        const titleMap = new Map<string, string>();
+        while ((match = titleRegex.exec(text)) !== null) {
+          const idx = match[1] || '1';
+          const clean = match[2]
+            .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
+            .replace(/[[\]"']/g, '')
+            .trim();
+          titleMap.set(idx, clean);
+        }
+
+        const extraRegex = /\|\s*(?:extra|writer|note)(\d*)\s*=\s*([^|\n]+)/gi;
+        const extraMap = new Map<string, string>();
+        while ((match = extraRegex.exec(text)) !== null) {
+          const idx = match[1] || '1';
+          const clean = match[2]
+            .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
+            .replace(/[[\]"']/g, '')
+            .trim();
+          if (!extraMap.has(idx)) extraMap.set(idx, clean);
+        }
+
+        const parsed: { title: string; artist: string }[] = [];
+        for (const [idx, tName] of titleMap.entries()) {
+          if (tName && !tName.toLowerCase().includes('total length') && tName.length > 1) {
+            parsed.push({
+              title: tName,
+              artist: extraMap.get(idx) || 'Original Soundtrack',
+            });
+          }
+        }
+
+        if (parsed.length > 2) {
+          const enriched = await Promise.all(
+            parsed.slice(0, 12).map(async (p, idx) => {
+              const audio = await this.enrichTrackWithAudio(p.title, p.artist);
+              return {
+                songName: p.title,
+                artist: p.artist,
+                episodeRef: `From Soundtrack: ${pageTitle}`,
+                popularityRank: idx + 1,
+                previewUrl: audio.previewUrl,
+                albumArtUrl: audio.albumArtUrl,
+                spotifyUrl: audio.appleMusicUrl,
+              };
+            })
+          );
+          return enriched;
+        }
+      } catch {
+        // try next
       }
     }
 
@@ -297,6 +454,21 @@ export class SoundtrackService {
             };
           })
         );
+
+        // Also attempt to discover and merge any additional album tracks without duplicates
+        try {
+          const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName);
+          if (albumTracks.length > 0) {
+            const seen = new Set(enriched.map((e) => e.songName.toLowerCase().trim()));
+            const additional = albumTracks.filter(
+              (at) => !seen.has(at.songName.toLowerCase().trim())
+            );
+            return [...enriched, ...additional].slice(0, 18);
+          }
+        } catch {
+          // keep enriched
+        }
+
         return enriched;
       }
     }
@@ -311,7 +483,7 @@ export class SoundtrackService {
       console.warn(`[SoundtrackService] Album discovery error for "${titleName}":`, albumErr.message);
     }
 
-    // 3. Fallback: Multi-angle iTunes song search
+    // 3. Fallback: Multi-angle iTunes song search (strictly matching title)
     try {
       const queries = [
         `${titleName} soundtrack`,
@@ -333,6 +505,7 @@ export class SoundtrackService {
 
       const seen = new Set<string>();
       const dynamicTracks: SoundtrackTrack[] = [];
+      const titleLower = titleName.toLowerCase();
 
       for (const item of combinedResults) {
         const rawTrack = (item.trackName || '').trim();
@@ -341,15 +514,9 @@ export class SoundtrackService {
 
         const coll = (item.collectionName || '').toLowerCase();
         const art = (item.artistName || '').toLowerCase();
-        const titleLower = titleName.toLowerCase();
 
         // Check if track is genuinely related to this movie/series
-        const isRelated =
-          coll.includes(titleLower) ||
-          art.includes(titleLower) ||
-          key.includes(titleLower) ||
-          coll.includes('soundtrack') ||
-          coll.includes('score');
+        const isRelated = coll.includes(titleLower) || art.includes(titleLower);
 
         if (isRelated) {
           seen.add(key);
