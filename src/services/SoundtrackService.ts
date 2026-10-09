@@ -178,6 +178,25 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'I Will Survive', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 3 Episode 17 - Axara & Lucifer Duet', popularityRank: 9 },
     { songName: 'Sanctuary', artist: 'Welshly Arms', episodeRef: 'Season 4 Episode 10 - Demon Showdown', popularityRank: 10 },
   ],
+  the_originals: [
+    { songName: 'Devils Work', artist: 'Miike Snow', episodeRef: 'Season 1 Episode 1 - Klaus Returns to New Orleans', popularityRank: 1 },
+    { songName: 'Bartholomew', artist: 'The Silent Comedy', episodeRef: 'Season 1 Episode 2 - French Quarter Showdown', popularityRank: 2 },
+    { songName: 'Waiting Game', artist: 'BANKS', episodeRef: 'Season 1 Episode 8 - Klaus & Marcel Confrontation', popularityRank: 3 },
+    { songName: 'Dark Paradise', artist: 'Lana Del Rey', episodeRef: 'Season 1 Episode 1 - Hayley & Klaus', popularityRank: 4 },
+    { songName: 'Terrible Love', artist: 'Birdy', episodeRef: 'Season 1 Episode 16 - Elijah & Klaus Brotherhood Scene', popularityRank: 5 },
+    { songName: 'Sharks', artist: 'Imagine Dragons', episodeRef: 'Season 2 Official Promo Theme', popularityRank: 6 },
+    { songName: 'No Diggity', artist: 'Chet Faker', episodeRef: "Season 1 - Rousseau's Bar Atmosphere", popularityRank: 7 },
+    { songName: 'Warm Shadow', artist: 'Fink', episodeRef: "Season 1 Finale - Hope's Departure to Safety", popularityRank: 8 },
+  ],
+  the_heirs: [
+    { songName: "I'm Saying (말이야)", artist: 'Lee Hong Gi', episodeRef: 'Main Title Opening Theme - High School Life', popularityRank: 1 },
+    { songName: 'Moment (Love is the Moment)', artist: 'Lee Changmin', episodeRef: 'Season 1 - Kim Tan & Cha Eun-sang Romantic Climax', popularityRank: 2 },
+    { songName: 'Story', artist: 'Park Shin Hye', episodeRef: "Cha Eun-sang's Solitary Reflections Theme", popularityRank: 3 },
+    { songName: 'In the Name of Love', artist: 'Ken (VIXX)', episodeRef: 'Jeguk High School Hallway Walk', popularityRank: 4 },
+    { songName: 'Bite My Lower Lip', artist: 'Esna', episodeRef: 'Season 1 Episode 3 - California Beach Montage', popularityRank: 5 },
+    { songName: 'Growing Pains 2', artist: 'Cold Cherry', episodeRef: 'Season 1 Emotional Breakups & Tension', popularityRank: 6 },
+    { songName: 'Crying Again', artist: 'Moon Myung Jin', episodeRef: 'Season 1 Rain Scene / Heartbreak Theme', popularityRank: 7 },
+  ],
 };
 
 export class SoundtrackService {
@@ -252,7 +271,8 @@ export class SoundtrackService {
   public static async discoverAlbumSoundtrack(
     titleName: string,
     originalName?: string,
-    mediaType?: 'film' | 'tv'
+    mediaType?: 'film' | 'tv',
+    releaseYear?: number
   ): Promise<SoundtrackTrack[]> {
     const cleanTitle = titleName.trim();
     const titleLower = cleanTitle.toLowerCase();
@@ -351,14 +371,19 @@ export class SoundtrackService {
             return false;
           }
 
+          // Disqualify if artist name is simply identical to title name (e.g. band "The Heirs") unless it says Cast or Soundtrack
+          if (artist === titleLower && !artist.includes('cast') && !name.includes('soundtrack') && !name.includes('score') && !name.includes('ost')) {
+            return false;
+          }
+
           const isSoundtrack =
             name.includes('soundtrack') ||
             name.includes('ost') ||
             name.includes('score') ||
             name.includes('music from') ||
-            name.includes('series') ||
-            name.includes('original') ||
-            artist.includes(titleLower) ||
+            name.includes('television soundtrack') ||
+            name.includes('series soundtrack') ||
+            name.includes('motion picture') ||
             artist.includes('soundtrack') ||
             artist.includes('cast') ||
             artist.includes('various artists');
@@ -478,7 +503,8 @@ export class SoundtrackService {
   public static async getSoundtracksForTitle(
     titleName: string,
     originalName?: string,
-    mediaType?: 'film' | 'tv'
+    mediaType?: 'film' | 'tv',
+    releaseYear?: number
   ): Promise<SoundtrackTrack[]> {
     const norm = titleName.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 
@@ -503,7 +529,7 @@ export class SoundtrackService {
 
         // Also attempt to discover and merge any additional album tracks without duplicates
         try {
-          const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType);
+          const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType, releaseYear);
           if (albumTracks.length > 0) {
             const seen = new Set(enriched.map((e) => e.songName.toLowerCase().trim()));
             const additional = albumTracks.filter(
@@ -521,7 +547,7 @@ export class SoundtrackService {
 
     // 2. Automated Universal Album Discovery (Authentic OST albums across KDramas, Films, Western TV)
     try {
-      const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType);
+      const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType, releaseYear);
       if (albumTracks.length > 0) {
         return albumTracks;
       }

@@ -217,6 +217,84 @@ export const getGenres = async (req: Request, res: Response, next: NextFunction)
 
 
 /**
+ * Universal verification to ensure soundtracks are authentic, correct, and have audio previews.
+ * If unverified or mismatched, the system dynamically re-identifies the title and discovers the real songs.
+ */
+function isSoundtrackVerified(title: any, soundtracks: any[]): boolean {
+  if (!soundtracks || soundtracks.length === 0) return false;
+
+  // 1. Must have audio previews
+  const hasPreviews = soundtracks.some((s) => s.previewUrl);
+  if (!hasPreviews) return false;
+
+  // 2. Reject if single placeholder generic theme
+  if (soundtracks.length === 1 && soundtracks[0].songName?.includes('Official Main Theme & Score')) {
+    return false;
+  }
+
+  const titleNameLower = (title.name || '').toLowerCase().trim();
+
+  // 3. Medium & content integrity checks
+  for (const s of soundtracks) {
+    const songLower = (s.songName || '').toLowerCase();
+    const artistLower = (s.artist || '').toLowerCase();
+    const refLower = (s.episodeRef || s.sceneRef || '').toLowerCase();
+
+    // Reject cross-medium: TV show having Motion Picture soundtrack
+    if (title.type === 'tv' && (refLower.includes('motion picture') || refLower.includes('movie soundtrack'))) {
+      return false;
+    }
+
+    // Specific false positive catches
+    if (titleNameLower.includes('gossip girl') && (songLower.includes('another day of sun') || artistLower.includes('la la land'))) {
+      return false;
+    }
+    if (!titleNameLower.includes('la la land') && artistLower.includes('la la land cast')) {
+      return false;
+    }
+    if (
+      titleNameLower.includes('lucifer') &&
+      (songLower.includes('raftaara') ||
+        artistLower.includes('deepak dev') ||
+        artistLower.includes('atom music audio') ||
+        songLower.includes('cinderella') ||
+        artistLower.includes('karthik'))
+    ) {
+      return false;
+    }
+    if (titleNameLower.includes('the originals') && artistLower.includes('prince')) {
+      return false;
+    }
+    if (titleNameLower.includes('the heirs') && (refLower.includes('ecliptic') || artistLower === 'the heirs')) {
+      return false;
+    }
+    if (titleNameLower.includes('boys over flowers') && !soundtracks.some((st) => st.songName.includes('파라다이스'))) {
+      return false;
+    }
+    if (titleNameLower.includes('riverdale') && !soundtracks.some((st) => st.songName.toLowerCase().includes('kids in america'))) {
+      return false;
+    }
+  }
+
+  // 4. Reject naive repetitions (e.g. tracks repeating title name instead of real songs)
+  const titleWords = titleNameLower
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter((w: string) => w.length > 2 && !['the', 'and', 'for', 'from', 'with'].includes(w));
+
+  if (titleWords.length > 0) {
+    const matchingTitleCount = soundtracks.filter((s) =>
+      titleWords.every((w: string) => (s.songName || '').toLowerCase().includes(w))
+    ).length;
+    if (soundtracks.length > 0 && matchingTitleCount >= 2 && matchingTitleCount >= soundtracks.length * 0.7) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Get full title details including watch providers, seasons/episodes, soundtracks, and comments
  */
 export const getTitleDetails = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -371,39 +449,15 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
 
     // 1. Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
     let finalSoundtracks = soundtracks;
-    const titleNameLower = title.name.toLowerCase();
-    const isRiverdale = titleNameLower.includes('riverdale');
-    const isBoysOverFlowers = titleNameLower.includes('boys over flowers');
-    const isGossipGirl = titleNameLower.includes('gossip girl');
-    const isLucifer = titleNameLower.includes('lucifer');
+    const isVerified = isSoundtrackVerified(title, soundtracks);
 
-    // Detect mismatched soundtracks (e.g. Gossip Girl having La La Land, Lucifer having Indian movie tracks, or TV shows having movie soundtracks)
-    const isMismatched =
-      (isGossipGirl && soundtracks.some((s) => s.songName.includes('Another Day of Sun') || s.artist.includes('La La Land'))) ||
-      (!titleNameLower.includes('la la land') && soundtracks.some((s) => s.artist.includes('La La Land Cast'))) ||
-      (isLucifer && soundtracks.some((s) => s.songName.includes('Raftaara') || s.artist.includes('Deepak Dev') || s.artist.includes('Atom Music Audio') || s.songName.includes('Cinderella') || s.artist.includes('Karthik'))) ||
-      (title.type === 'tv' && soundtracks.some((s) => s.episodeRef?.toLowerCase().includes('motion picture'))) ||
-      (isBoysOverFlowers && !soundtracks.some((s) => s.songName.includes('파라다이스'))) ||
-      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america')));
-
-    // Detect if existing tracks are naive keyword matches (e.g. tracks repeating the title name instead of real OST tracks)
-    const matchingTitleCount = soundtracks.filter((s) =>
-      s.songName.toLowerCase().includes(titleNameLower)
-    ).length;
-    const isNaiveMatchesOnly = soundtracks.length > 0 && matchingTitleCount >= 2;
-
-    const needsRefresh =
-      soundtracks.length === 0 ||
-      !soundtracks.some((s) => s.previewUrl) ||
-      isNaiveMatchesOnly ||
-      isMismatched;
-
-    if (needsRefresh) {
+    if (!isVerified) {
       try {
         const dynamicTracks = await SoundtrackService.getSoundtracksForTitle(
           title.name,
           (title as any).originalName,
-          title.type as any
+          title.type as any,
+          title.releaseYear
         );
         if (dynamicTracks.length > 0) {
           finalSoundtracks = dynamicTracks as any;
@@ -434,17 +488,13 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         !firstSeason.episodes ||
         firstSeason.episodes.length === 0 ||
         firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
-      const hasMismatchedEpisodeSong = firstSeason.episodes?.some(
-        (e: any) =>
-          e.featuredSong &&
-          ((titleNameLower.includes('gossip girl') && (e.featuredSong.songName?.includes('Another Day of Sun') || e.featuredSong.artist?.includes('La La Land'))) ||
-           (!titleNameLower.includes('la la land') && e.featuredSong.artist?.includes('La La Land Cast')))
-      );
+      const firstSeasonSongs = (firstSeason.episodes || []).map((e: any) => e.featuredSong).filter(Boolean);
+      const isSeasonSongsVerified = isSoundtrackVerified(title, firstSeasonSongs);
 
       const needsSongRefresh =
-        needsRefresh ||
+        !isVerified ||
+        !isSeasonSongsVerified ||
         hasGenericEpisodes ||
-        hasMismatchedEpisodeSong ||
         firstSeason.episodes.some(
           (e: any) =>
             !e.featuredSong ||
@@ -574,20 +624,12 @@ export const getSeasonEpisodes = async (
       seasonDoc.episodes.length === 0 ||
       seasonDoc.episodes.some((e: any) => e.name && e.name.match(/^Episode \d+$/i));
 
-    const titleNameLower = title.name.toLowerCase();
-    const isLucifer = titleNameLower.includes('lucifer');
-    const hasMismatchedSongs = seasonDoc?.episodes?.some(
-      (e: any) =>
-        e.featuredSong &&
-        ((titleNameLower.includes('gossip girl') && (e.featuredSong.songName?.includes('Another Day of Sun') || e.featuredSong.artist?.includes('La La Land'))) ||
-         (isLucifer && (e.featuredSong.songName?.includes('Raftaara') || e.featuredSong.artist?.includes('Deepak Dev') || e.featuredSong.artist?.includes('Atom Music Audio') || e.featuredSong.artist?.includes('Karthik'))) ||
-         (title.type === 'tv' && e.featuredSong.sceneRef?.toLowerCase().includes('motion picture')) ||
-         (!titleNameLower.includes('la la land') && e.featuredSong.artist?.includes('La La Land Cast')))
-    );
+    const seasonSongs = (seasonDoc?.episodes || []).map((e: any) => e.featuredSong).filter(Boolean);
+    const isSeasonSongsVerified = isSoundtrackVerified(title, seasonSongs);
 
     const needsSongEnrichment =
       hasGeneric ||
-      hasMismatchedSongs ||
+      !isSeasonSongsVerified ||
       (seasonDoc?.episodes?.some(
         (e: any) =>
           !e.featuredSong ||
@@ -609,7 +651,8 @@ export const getSeasonEpisodes = async (
         const songs = await SoundtrackService.getSoundtracksForTitle(
           title.name,
           (title as any).originalName,
-          title.type as any
+          title.type as any,
+          title.releaseYear
         );
         const totalEps = baseEpisodes.length;
         const enriched = baseEpisodes.map((ep: any) => {
