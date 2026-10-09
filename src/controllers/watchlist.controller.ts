@@ -221,7 +221,17 @@ export const getTitleWatchlistStatus = async (req: IAuthRequest, res: Response, 
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return next(new AppError('Unauthorized', 401));
+      sendSuccess(
+        res,
+        {
+          inWatchlist: false,
+          watched: false,
+          starRating: 0,
+          item: null,
+        },
+        'Guest watchlist status'
+      );
+      return;
     }
 
     const { titleId } = req.params;
