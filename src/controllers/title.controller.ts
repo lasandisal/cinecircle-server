@@ -214,6 +214,73 @@ export const getGenres = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; episodeRef: string; popularityRank: number }[]> = {
+  friends: [
+    { songName: "I'll Be There for You", artist: 'The Rembrandts', episodeRef: 'Main Theme & Central Perk Fountain', popularityRank: 1 },
+    { songName: 'Smelly Cat', artist: 'Phoebe Buffay (Lisa Kudrow)', episodeRef: 'Central Perk Live Gig & Music Video', popularityRank: 2 },
+    { songName: 'With or Without You', artist: 'U2', episodeRef: 'Ross Radio Dedication to Rachel', popularityRank: 3 },
+    { songName: 'Wicked Game', artist: 'Chris Isaak', episodeRef: 'Hayden Planetarium Date Scene', popularityRank: 4 },
+    { songName: 'Angel of the Morning', artist: 'Juice Newton', episodeRef: 'Central Perk Flashback Coffee Bar', popularityRank: 5 },
+    { songName: 'Shiny Happy People', artist: 'R.E.M.', episodeRef: 'Green Apartment Celebration Party', popularityRank: 6 },
+    { songName: 'You Were Meant for Me', artist: 'Jewel', episodeRef: 'Central Perk Heart-to-Heart', popularityRank: 7 },
+  ],
+  stranger_things: [
+    { songName: 'Running Up That Hill (A Deal with God)', artist: 'Kate Bush', episodeRef: "Season 4 - Max's Mind Lair Escape", popularityRank: 1 },
+    { songName: 'Master of Puppets', artist: 'Metallica', episodeRef: "Season 4 - Eddie's Upside Down Guitar Solo", popularityRank: 2 },
+    { songName: 'Should I Stay or Should I Go', artist: 'The Clash', episodeRef: 'Season 1 - Castle Byers Transmission', popularityRank: 3 },
+    { songName: 'Every Breath You Take', artist: 'The Police', episodeRef: 'Season 2 - Snow Ball 1984', popularityRank: 4 },
+  ],
+  the_bear: [
+    { songName: 'New Noise', artist: 'Refused', episodeRef: 'Kitchen High-Pressure Rush Hour', popularityRank: 1 },
+    { songName: 'Spiders (Kidsmoke)', artist: 'Wilco', episodeRef: 'Opening Morning Prep Montage', popularityRank: 2 },
+    { songName: 'Let Down', artist: 'Radiohead', episodeRef: 'Season 1 Finale Family Dinner Service', popularityRank: 3 },
+    { songName: 'Love Story (Taylor’s Version)', artist: 'Taylor Swift', episodeRef: "Season 2 - Richie's Staging Breakthrough Drive", popularityRank: 4 },
+  ],
+  succession: [
+    { songName: 'Succession Main Title Theme', artist: 'Nicholas Britell', episodeRef: 'Roy Family Empire Opening Theme', popularityRank: 1 },
+    { songName: 'Andante Risoluto', artist: 'Nicholas Britell', episodeRef: 'Season 2 Boardroom Showdown', popularityRank: 2 },
+    { songName: 'Honesty', artist: 'Billy Joel', episodeRef: "Kendall's 40th Birthday Party", popularityRank: 3 },
+  ],
+  arcane: [
+    { songName: 'Enemy', artist: 'Imagine Dragons & JID', episodeRef: 'Opening Theme & Zaun Underworld', popularityRank: 1 },
+    { songName: 'Guns for Hire', artist: 'Woodkid', episodeRef: "Silco & Jinx's Pivotal River Pier Scene", popularityRank: 2 },
+    { songName: 'What Could Have Been', artist: 'Sting & Ray Chen', episodeRef: 'Season 1 Climactic Finale Feast', popularityRank: 3 },
+  ],
+  interstellar: [
+    { songName: 'Cornfield Chase', artist: 'Hans Zimmer', episodeRef: 'Drone Pursuit Through the Cornfield', popularityRank: 1 },
+    { songName: 'No Time for Caution', artist: 'Hans Zimmer', episodeRef: 'Endurance Spinning Docking Sequence', popularityRank: 2 },
+    { songName: 'Stay', artist: 'Hans Zimmer', episodeRef: "Murph's Bedroom Departure Farewell", popularityRank: 3 },
+  ],
+  dune: [
+    { songName: 'Paul’s Dream', artist: 'Hans Zimmer', episodeRef: 'Visions of the Golden Path & Chani', popularityRank: 1 },
+    { songName: 'Ripples in the Sand', artist: 'Hans Zimmer', episodeRef: 'Shai-Hulud Sandworm Awakening', popularityRank: 2 },
+    { songName: 'Leaving Caladan', artist: 'Hans Zimmer', episodeRef: 'House Atreides Departure Fleet', popularityRank: 3 },
+  ],
+};
+
+const getCuratedSoundtracks = (titleName: string) => {
+  const norm = titleName.toLowerCase();
+  for (const [key, songs] of Object.entries(ICONIC_SOUNDTRACKS)) {
+    if (norm.includes(key.replace(/_/g, ' ')) || key.includes(norm)) {
+      return songs;
+    }
+  }
+  return [
+    {
+      songName: `${titleName} Official Main Theme & Suite`,
+      artist: 'Original Motion Picture Score',
+      episodeRef: 'Main Title / Opening Scene',
+      popularityRank: 1,
+    },
+    {
+      songName: `${titleName} End Credits Symphonic Suite`,
+      artist: 'Original Motion Picture Soundtrack',
+      episodeRef: 'Closing Credits Sequence',
+      popularityRank: 2,
+    },
+  ];
+};
+
 /**
  * Get full title details including watch providers, seasons/episodes, soundtracks, and comments
  */
@@ -296,7 +363,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
 
     // Fetch related models concurrently
     const titleObjId = title._id;
-    const [watchProviders, seasons, soundtracks, allComments] = titleObjId
+    let [watchProviders, seasons, soundtracks, allComments] = titleObjId
       ? await Promise.all([
           WatchProvider.find({ title: titleObjId }).lean(),
           SeasonEpisode.find({ title: titleObjId }).sort({ seasonNumber: 1 }).lean(),
@@ -307,6 +374,65 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
             .lean(),
         ])
       : [[], [], [], []];
+
+    // Auto-refresh watch providers to ensure global providers like Netflix are present
+    if (title.tmdbId && !watchProviders.some((p) => p.service.toLowerCase().includes('netflix'))) {
+      try {
+        const freshData = await tmdbService.fetchDetails(title.tmdbId, title.type);
+        if (freshData?.watchProviders && freshData.watchProviders.length > 0) {
+          await WatchProvider.deleteMany({ title: titleObjId });
+          const newDocs = freshData.watchProviders.map((wp) => ({
+            title: titleObjId,
+            service: wp.service,
+            region: wp.region,
+            type: wp.type,
+          }));
+          watchProviders = (await WatchProvider.insertMany(newDocs)) as any;
+        }
+      } catch (err: any) {
+        console.warn('[getTitleDetails] Error refreshing watch providers:', err.message);
+      }
+    }
+
+    // Auto-enrich Season 1 episodes with real TMDB data if only placeholder names exist
+    if (title.type === 'tv' && title.tmdbId && seasons.length > 0) {
+      const firstSeason = seasons[0];
+      const hasGenericEpisodes =
+        !firstSeason.episodes ||
+        firstSeason.episodes.length === 0 ||
+        firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
+
+      if (hasGenericEpisodes) {
+        try {
+          const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, firstSeason.seasonNumber);
+          if (tmdbSeason && tmdbSeason.episodes.length > 0) {
+            const songs = getCuratedSoundtracks(title.name);
+            const enriched = tmdbSeason.episodes.map((ep, idx) => ({
+              ...ep,
+              featuredSong: songs[idx % songs.length]
+                ? {
+                    songName: songs[idx % songs.length].songName,
+                    artist: songs[idx % songs.length].artist,
+                    sceneRef: songs[idx % songs.length].episodeRef,
+                  }
+                : undefined,
+            }));
+
+            await SeasonEpisode.updateOne(
+              { _id: firstSeason._id },
+              { $set: { episodes: enriched } }
+            );
+            firstSeason.episodes = enriched as any;
+          }
+        } catch (err: any) {
+          console.warn('[getTitleDetails] Error refreshing season 1 episodes:', err.message);
+        }
+      }
+    }
+
+    // Curated soundtracks if none stored
+    const finalSoundtracks =
+      soundtracks.length > 0 ? soundtracks : getCuratedSoundtracks(title.name);
 
     // Group replies under top-level parent comments
     const parentComments: any[] = [];
@@ -333,11 +459,79 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       ...title,
       watchProviders,
       seasons,
-      soundtracks,
+      soundtracks: finalSoundtracks,
       comments: commentsWithReplies,
     };
 
     sendSuccess(res, { title: fullDetail }, 'Title details retrieved');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Fetch detailed episodes for a specific season from MongoDB or TMDB
+ */
+export const getSeasonEpisodes = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const titleId = String(req.params.titleId);
+    const seasonNumber = parseInt(String(req.params.seasonNumber), 10);
+    if (isNaN(seasonNumber)) {
+      res.status(400).json({ success: false, error: 'Invalid season number' });
+      return;
+    }
+
+    let title: any = null;
+    if (mongoose.Types.ObjectId.isValid(titleId)) {
+      title = await Title.findById(titleId).lean();
+    } else {
+      const tmdbIdNum = parseInt(titleId, 10);
+      if (!isNaN(tmdbIdNum)) {
+        title = await Title.findOne({ tmdbId: tmdbIdNum }).lean();
+      }
+    }
+
+    if (!title) {
+      res.status(404).json({ success: false, error: 'Title not found' });
+      return;
+    }
+
+    let seasonDoc = await SeasonEpisode.findOne({ title: title._id, seasonNumber }).lean();
+
+    const hasGeneric =
+      !seasonDoc ||
+      !seasonDoc.episodes ||
+      seasonDoc.episodes.length === 0 ||
+      seasonDoc.episodes.some((e: any) => e.name && e.name.match(/^Episode \d+$/i));
+
+    if (hasGeneric && title.tmdbId) {
+      const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
+      if (tmdbSeason && tmdbSeason.episodes.length > 0) {
+        const songs = getCuratedSoundtracks(title.name);
+        const enriched = tmdbSeason.episodes.map((ep, idx) => ({
+          ...ep,
+          featuredSong: songs[idx % songs.length]
+            ? {
+                songName: songs[idx % songs.length].songName,
+                artist: songs[idx % songs.length].artist,
+                sceneRef: songs[idx % songs.length].episodeRef,
+              }
+            : undefined,
+        }));
+
+        seasonDoc = await SeasonEpisode.findOneAndUpdate(
+          { title: title._id, seasonNumber },
+          { $set: { title: title._id, seasonNumber, episodes: enriched } },
+          { upsert: true, new: true }
+        ).lean();
+      }
+    }
+
+    sendSuccess(res, { season: seasonDoc }, 'Season episodes retrieved');
   } catch (error) {
     next(error);
   }

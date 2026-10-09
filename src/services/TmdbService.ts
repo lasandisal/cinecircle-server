@@ -207,16 +207,58 @@ class TmdbService {
           photoUrl: c.profile_path ? `${TMDB_IMAGE_BASE}${c.profile_path}` : undefined,
         }));
 
-        // Parse Watch Providers (US & LK priority)
+        // Parse Watch Providers across priority and global regions (including Netflix, Max, Prime, etc.)
         const providersData = data['watch/providers']?.results || {};
-        const regional = providersData['US'] || providersData['LK'] || Object.values(providersData)[0] || {};
-        const flatrate = (regional as any).flatrate || [];
+        const serviceMap = new Map<string, Set<string>>();
 
-        const watchProviders = flatrate.map((p: any) => ({
-          service: p.provider_name || 'Streaming',
-          region: 'US',
-          type: 'subscription' as const,
-        }));
+        const priorityRegions = ['LK', 'US', 'GB', 'IN', 'AU', 'CA', 'DE', 'FR', 'JP'];
+        const allRegionKeys = Array.from(new Set([...priorityRegions, ...Object.keys(providersData)]));
+
+        for (const rKey of allRegionKeys) {
+          const rData = providersData[rKey];
+          if (!rData || !Array.isArray(rData.flatrate)) continue;
+          for (const item of rData.flatrate) {
+            const rawName = item.provider_name;
+            if (!rawName) continue;
+            let normalized = rawName;
+            if (rawName.toLowerCase().includes('netflix')) normalized = 'Netflix';
+            else if (rawName.toLowerCase().includes('max') || rawName.toLowerCase().includes('hbo')) normalized = 'Max';
+            else if (rawName.toLowerCase().includes('disney')) normalized = 'Disney+';
+            else if (rawName.toLowerCase().includes('prime video') || rawName.toLowerCase().includes('amazon prime')) normalized = 'Prime Video';
+            else if (rawName.toLowerCase().includes('apple tv')) normalized = 'Apple TV+';
+            else if (rawName.toLowerCase().includes('hulu')) normalized = 'Hulu';
+            else if (rawName.toLowerCase().includes('paramount')) normalized = 'Paramount+';
+            else if (rawName.toLowerCase().includes('peacock')) normalized = 'Peacock';
+
+            if (!serviceMap.has(normalized)) {
+              serviceMap.set(normalized, new Set());
+            }
+            serviceMap.get(normalized)!.add(rKey);
+          }
+        }
+
+        const watchProviders: { service: string; region: string; type: 'subscription' }[] = [];
+        for (const [serviceName, regionsSet] of serviceMap.entries()) {
+          const regionsArr = Array.from(regionsSet);
+          let regionLabel = 'Global';
+          if (regionsArr.includes('US') && regionsArr.includes('LK')) {
+            regionLabel = 'US • LK';
+          } else if (regionsArr.includes('LK')) {
+            regionLabel = 'LK';
+          } else if (regionsArr.includes('US')) {
+            regionLabel = regionsArr.length > 5 ? 'US • Global' : 'US';
+          } else if (regionsArr.length > 10) {
+            regionLabel = 'Global';
+          } else {
+            regionLabel = regionsArr.slice(0, 3).join(' • ');
+          }
+
+          watchProviders.push({
+            service: serviceName,
+            region: regionLabel,
+            type: 'subscription',
+          });
+        }
 
         const genres = (data.genres || []).map((g: any) => g.name);
 
@@ -258,6 +300,56 @@ class TmdbService {
 
     console.warn(`[TmdbService] TMDB ID ${tmdbId} not found under movie or tv, using fallback`);
     return (fallbackMatch as FormattedTmdbTitle) || null;
+  }
+
+  /**
+   * Fetch full episodes for a specific season from TMDB
+   */
+  public async fetchSeasonDetails(
+    tmdbId: number,
+    seasonNumber: number
+  ): Promise<{
+    seasonNumber: number;
+    name: string;
+    overview: string;
+    episodes: {
+      episodeNumber: number;
+      name: string;
+      summary: string;
+      runtimeMinutes: number;
+      stillUrl: string;
+      airDate: string;
+      voteAverage: number;
+    }[];
+  } | null> {
+    if (!this.hasApiKey()) return null;
+
+    try {
+      const endpoint = `${TMDB_BASE_URL}/tv/${tmdbId}/season/${seasonNumber}`;
+      const response = await axios.get(endpoint, this.getRequestConfig());
+      const data = response.data;
+      if (!data || !Array.isArray(data.episodes)) return null;
+
+      const episodes = data.episodes.map((ep: any) => ({
+        episodeNumber: ep.episode_number,
+        name: ep.name || `Episode ${ep.episode_number}`,
+        summary: ep.overview || '',
+        runtimeMinutes: ep.runtime || 22,
+        stillUrl: ep.still_path ? `${TMDB_IMAGE_BASE}${ep.still_path}` : '',
+        airDate: ep.air_date || '',
+        voteAverage: ep.vote_average ? Math.round(ep.vote_average * 10) / 10 : 0,
+      }));
+
+      return {
+        seasonNumber: data.season_number,
+        name: data.name || `Season ${data.season_number}`,
+        overview: data.overview || '',
+        episodes,
+      };
+    } catch (err: any) {
+      console.warn(`[TmdbService] Failed fetching season ${seasonNumber} for TMDB ID ${tmdbId}:`, err.message);
+      return null;
+    }
   }
 
   /**

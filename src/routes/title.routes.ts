@@ -5,6 +5,7 @@ import {
   searchTitles,
   getGenres,
   getTitleDetails,
+  getSeasonEpisodes,
   seedTitles,
   addComment,
   getComments,
@@ -25,8 +26,9 @@ router.get('/search', searchTitles);
 // Catalog Seeding
 router.post('/seed', seedTitles);
 
-// Title details & comments
+// Title details, seasons & comments
 router.get('/:titleId', getTitleDetails);
+router.get('/:titleId/seasons/:seasonNumber', getSeasonEpisodes);
 router.get('/:titleId/comments', getComments);
 router.post('/:titleId/comments', authenticate, addComment);
 router.post('/comments/:commentId/like', likeComment);
