@@ -256,6 +256,14 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'Ripples in the Sand', artist: 'Hans Zimmer', episodeRef: 'Shai-Hulud Sandworm Awakening', popularityRank: 2 },
     { songName: 'Leaving Caladan', artist: 'Hans Zimmer', episodeRef: 'House Atreides Departure Fleet', popularityRank: 3 },
   ],
+  vampire_diaries: [
+    { songName: 'Never Say Never', artist: 'The Fray', episodeRef: 'Season 1 Finale / Elena & Stefan', popularityRank: 1 },
+    { songName: 'All I Need', artist: 'Within Temptation', episodeRef: 'Season 1 - Miss Mystic Falls Damon & Elena Dance', popularityRank: 2 },
+    { songName: 'A Drop in the Ocean', artist: 'Ron Pope', episodeRef: 'Season 3 - Stefan Birthday Phone Call to Elena', popularityRank: 3 },
+    { songName: 'Bloodstream', artist: 'Stateless', episodeRef: 'Season 1 Finale - Damon & Katherine Porch Scene', popularityRank: 4 },
+    { songName: 'Skinny Love', artist: 'Birdy', episodeRef: "Season 2 Finale - Jenna's Funeral & John's Letter", popularityRank: 5 },
+    { songName: 'Hold On', artist: 'Chord Overstreet', episodeRef: 'Series Finale - Peace in the Afterlife', popularityRank: 6 },
+  ],
 };
 
 const getCuratedSoundtracks = (titleName: string) => {
@@ -287,24 +295,36 @@ const getCuratedSoundtracks = (titleName: string) => {
 export const getTitleDetails = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
+    const requestedType =
+      req.query.type === 'tv' || req.query.type === 'film' ? (req.query.type as 'tv' | 'film') : undefined;
 
     let title: any = null;
 
     // Check if valid ObjectId or TMDB ID
     if (mongoose.Types.ObjectId.isValid(titleId)) {
       title = await Title.findById(titleId).lean();
-    } else {
-      const tmdbIdNum = parseInt(titleId, 10);
-      if (!isNaN(tmdbIdNum)) {
-        title = await Title.findOne({ tmdbId: tmdbIdNum }).lean();
+      // If requestedType doesn't match the DB title's type, ignore and fetch by tmdbId/type
+      if (title && requestedType && title.type !== requestedType) {
+        title = null;
       }
     }
 
-    // If not found in DB, try fetching directly from TMDB service and save to MongoDB
     if (!title) {
       const tmdbIdNum = parseInt(titleId, 10);
       if (!isNaN(tmdbIdNum)) {
-        const tmdbData = await tmdbService.fetchDetails(tmdbIdNum);
+        const query: any = { tmdbId: tmdbIdNum };
+        if (requestedType === 'tv' || requestedType === 'film') {
+          query.type = requestedType;
+        }
+        title = await Title.findOne(query).lean();
+      }
+    }
+
+    // If not found in DB, try fetching directly from TMDB service with requestedType and save to MongoDB
+    if (!title) {
+      const tmdbIdNum = parseInt(titleId, 10);
+      if (!isNaN(tmdbIdNum)) {
+        const tmdbData = await tmdbService.fetchDetails(tmdbIdNum, requestedType);
         if (tmdbData) {
           try {
             const created = await Title.create({
@@ -350,7 +370,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
             title = created.toObject();
           } catch (dbErr) {
             // Handle race conditions or duplicate key error
-            title = (await Title.findOne({ tmdbId: tmdbIdNum }).lean()) || tmdbData;
+            title = (await Title.findOne({ tmdbId: tmdbIdNum, type: tmdbData.type }).lean()) || tmdbData;
           }
         }
       }

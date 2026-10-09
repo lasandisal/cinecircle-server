@@ -5,9 +5,9 @@ export interface ITitleDocument extends Omit<ITitle, '_id'>, Document {}
 
 const TitleSchema = new Schema<ITitleDocument>(
   {
-    tmdbId: { type: Number, required: true, unique: true },
+    tmdbId: { type: Number, required: true, index: true },
     name: { type: String, required: true, index: true },
-    type: { type: String, enum: ['tv', 'film'], required: true },
+    type: { type: String, enum: ['tv', 'film'], required: true, index: true },
     genres: { type: [String], default: [] },
     synopsis: { type: String, default: '' },
     runtimeMinutes: { type: Number, default: 0 },
@@ -27,5 +27,7 @@ const TitleSchema = new Schema<ITitleDocument>(
   },
   { timestamps: true }
 );
+
+TitleSchema.index({ tmdbId: 1, type: 1 }, { unique: true });
 
 export const Title = mongoose.model<ITitleDocument>('Title', TitleSchema);
