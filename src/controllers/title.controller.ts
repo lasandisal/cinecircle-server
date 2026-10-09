@@ -238,23 +238,43 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
     }
 
     // Fetch related models concurrently
-    const [watchProviders, seasons, soundtracks, comments] = await Promise.all([
+    const [watchProviders, seasons, soundtracks, allComments] = await Promise.all([
       WatchProvider.find({ title: title._id }).lean(),
       SeasonEpisode.find({ title: title._id }).sort({ seasonNumber: 1 }).lean(),
       Soundtrack.find({ title: title._id }).sort({ popularityRank: 1 }).lean(),
       Comment.find({ title: title._id })
         .populate('user', 'name email role')
-        .sort({ createdAt: -1 })
-        .limit(20)
+        .sort({ createdAt: 1 })
         .lean(),
     ]);
+
+    // Group replies under top-level parent comments
+    const parentComments: any[] = [];
+    const replyMap = new Map<string, any[]>();
+
+    for (const c of allComments) {
+      if (c.parentId) {
+        const pid = c.parentId.toString();
+        if (!replyMap.has(pid)) replyMap.set(pid, []);
+        replyMap.get(pid)!.push(c);
+      } else {
+        parentComments.push(c);
+      }
+    }
+
+    const commentsWithReplies = parentComments
+      .map((p) => ({
+        ...p,
+        replies: replyMap.get(p._id.toString()) || [],
+      }))
+      .reverse();
 
     const fullDetail = {
       ...title,
       watchProviders,
       seasons,
       soundtracks,
-      comments,
+      comments: commentsWithReplies,
     };
 
     sendSuccess(res, { title: fullDetail }, 'Title details retrieved');
@@ -277,13 +297,13 @@ export const seedTitles = async (req: Request, res: Response, next: NextFunction
 };
 
 /**
- * Add a discussion comment on a title
+ * Add a discussion comment on a title (supports top-level, replies, and polls)
  */
 export const addComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
     const text = req.body.text || req.body.body;
-    const { containsSpoilers = false } = req.body;
+    const { containsSpoilers = false, parentId, poll } = req.body;
 
     if (!text || !text.trim()) {
       res.status(400).json({ success: false, error: 'Comment text is required' });
@@ -298,12 +318,26 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
 
     const rating = req.body.rating ? Number(req.body.rating) : undefined;
 
+    let pollData: any = undefined;
+    if (poll && poll.question && Array.isArray(poll.options) && poll.options.length >= 2) {
+      pollData = {
+        question: poll.question.trim(),
+        options: poll.options.map((opt: any) => ({
+          optionText: typeof opt === 'string' ? opt.trim() : (opt.optionText || '').trim(),
+          votes: [],
+        })),
+      };
+    }
+
     const comment = await Comment.create({
       title: title._id,
       user: req.user?.id,
       text: text.trim(),
       rating,
       likesCount: 0,
+      parentId: parentId || null,
+      poll: pollData,
+      reactions: [],
       containsSpoilers: !!containsSpoilers,
     });
 
@@ -316,17 +350,37 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
 };
 
 /**
- * Get comments for a title
+ * Get comments for a title with nested replies
  */
 export const getComments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
-    const comments = await Comment.find({ title: titleId })
+    const allComments = await Comment.find({ title: titleId })
       .populate('user', 'name email role')
-      .sort({ createdAt: -1 })
-      .limit(50);
+      .sort({ createdAt: 1 })
+      .lean();
 
-    sendSuccess(res, { comments }, 'Comments retrieved');
+    const parentComments: any[] = [];
+    const replyMap = new Map<string, any[]>();
+
+    for (const c of allComments) {
+      if (c.parentId) {
+        const pid = c.parentId.toString();
+        if (!replyMap.has(pid)) replyMap.set(pid, []);
+        replyMap.get(pid)!.push(c);
+      } else {
+        parentComments.push(c);
+      }
+    }
+
+    const commentsWithReplies = parentComments
+      .map((p) => ({
+        ...p,
+        replies: replyMap.get(p._id.toString()) || [],
+      }))
+      .reverse();
+
+    sendSuccess(res, { comments: commentsWithReplies }, 'Comments retrieved');
   } catch (error) {
     next(error);
   }
@@ -350,6 +404,80 @@ export const likeComment = async (req: Request, res: Response, next: NextFunctio
     }
 
     sendSuccess(res, { comment }, 'Comment liked');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * React to a comment with Facebook-style emojis (like, love, fire, mindblown, popcorn, sad)
+ */
+export const reactToComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const { emoji } = req.body;
+    const userId = req.user?.id;
+
+    if (!['like', 'love', 'fire', 'mindblown', 'popcorn', 'sad'].includes(emoji)) {
+      res.status(400).json({ success: false, error: 'Invalid reaction emoji' });
+      return;
+    }
+
+    const comment = await Comment.findById(commentId);
+    if (!comment) {
+      res.status(404).json({ success: false, error: 'Comment not found' });
+      return;
+    }
+
+    const existingIndex = (comment.reactions || []).findIndex(
+      (r) => r.user.toString() === userId && r.emoji === emoji
+    );
+
+    if (existingIndex > -1) {
+      // Toggle off existing same emoji
+      comment.reactions!.splice(existingIndex, 1);
+    } else {
+      // Remove other emoji by this user, then add new one
+      comment.reactions = (comment.reactions || []).filter((r) => r.user.toString() !== userId);
+      comment.reactions.push({ user: new mongoose.Types.ObjectId(userId), emoji } as any);
+    }
+
+    await comment.save();
+    const populated = await Comment.findById(comment._id).populate('user', 'name email role');
+    sendSuccess(res, { comment: populated }, 'Reaction updated');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Vote on a comment poll
+ */
+export const voteCommentPoll = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const { optionIndex } = req.body;
+    const userId = req.user?.id;
+
+    const comment = await Comment.findById(commentId);
+    if (!comment || !comment.poll || !comment.poll.options[optionIndex]) {
+      res.status(404).json({ success: false, error: 'Poll or option not found' });
+      return;
+    }
+
+    const uObjectId = new mongoose.Types.ObjectId(userId);
+
+    // Remove user's previous vote from all options in this poll
+    comment.poll.options.forEach((opt) => {
+      opt.votes = opt.votes.filter((v) => v.toString() !== userId);
+    });
+
+    // Add vote to chosen option
+    comment.poll.options[optionIndex].votes.push(uObjectId);
+
+    await comment.save();
+    const populated = await Comment.findById(comment._id).populate('user', 'name email role');
+    sendSuccess(res, { comment: populated }, 'Poll vote recorded');
   } catch (error) {
     next(error);
   }

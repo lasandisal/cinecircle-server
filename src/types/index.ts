@@ -130,6 +130,8 @@ export interface IWatchProvider {
   sourceUpdatedAt: Date;
 }
 
+export type ReactionType = 'like' | 'love' | 'fire' | 'mindblown' | 'popcorn' | 'sad';
+
 export interface IComment {
   _id: Types.ObjectId;
   title: Types.ObjectId;
@@ -137,6 +139,19 @@ export interface IComment {
   text: string;
   rating?: number;
   likesCount?: number;
+  parentId?: Types.ObjectId;
+  reactions?: {
+    user: Types.ObjectId;
+    emoji: ReactionType;
+  }[];
+  poll?: {
+    question: string;
+    options: {
+      _id?: Types.ObjectId;
+      optionText: string;
+      votes: Types.ObjectId[];
+    }[];
+  };
   containsSpoilers?: boolean;
   reported: boolean;
   hidden: boolean;

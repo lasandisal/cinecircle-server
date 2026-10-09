@@ -9,6 +9,8 @@ import {
   addComment,
   getComments,
   likeComment,
+  reactToComment,
+  voteCommentPoll,
 } from '../controllers/title.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -28,5 +30,7 @@ router.get('/:titleId', getTitleDetails);
 router.get('/:titleId/comments', getComments);
 router.post('/:titleId/comments', authenticate, addComment);
 router.post('/comments/:commentId/like', likeComment);
+router.post('/comments/:commentId/react', authenticate, reactToComment);
+router.post('/comments/:commentId/poll/vote', authenticate, voteCommentPoll);
 
 export default router;
