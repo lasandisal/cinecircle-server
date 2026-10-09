@@ -58,6 +58,7 @@ export interface ITitle {
   _id: Types.ObjectId;
   tmdbId: number;
   name: string;
+  originalName?: string;
   type: 'tv' | 'film';
   genres: string[];
   synopsis: string;

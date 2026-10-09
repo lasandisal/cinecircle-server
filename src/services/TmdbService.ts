@@ -6,6 +6,7 @@ import type { SeedTitleData } from '../data/seedTitles';
 export interface FormattedTmdbTitle {
   tmdbId: number;
   name: string;
+  originalName?: string;
   type: 'film' | 'tv';
   genres: string[];
   synopsis: string;
@@ -331,6 +332,7 @@ class TmdbService {
         return {
           tmdbId: data.id,
           name: isMovie ? data.title : data.name,
+          originalName: isMovie ? data.original_title : data.original_name,
           type: isMovie ? 'film' : 'tv',
           genres,
           synopsis: data.overview || '',

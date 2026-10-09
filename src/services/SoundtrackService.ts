@@ -171,13 +171,115 @@ export class SoundtrackService {
   }
 
   /**
-   * Get iconic soundtracks for any movie or TV series.
+   * Universal automated soundtrack discovery:
+   * Finds the official OST / Soundtrack album on Apple Music and extracts
+   * the authentic tracklist with real song titles, artists, 30s audio previews, and album art.
+   */
+  public static async discoverAlbumSoundtrack(
+    titleName: string,
+    originalName?: string
+  ): Promise<SoundtrackTrack[]> {
+    const cleanTitle = titleName.trim();
+    const queries = [
+      originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
+      originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
+      `${cleanTitle} Original Soundtrack`,
+      `${cleanTitle} (Original Television Soundtrack)`,
+      `${cleanTitle} (Original Motion Picture Soundtrack)`,
+      `${cleanTitle} OST`,
+      `${cleanTitle} Original Series Soundtrack`,
+      `${cleanTitle} Soundtrack`,
+      `${cleanTitle} Music from the Motion Picture`,
+      `${cleanTitle} Music from the Series`,
+    ].filter(Boolean) as string[];
+
+    const titleLower = cleanTitle.toLowerCase();
+    const origLower = (originalName || '').toLowerCase();
+
+    for (const q of queries) {
+      try {
+        const res = await axios.get('https://itunes.apple.com/search', {
+          params: {
+            term: q,
+            entity: 'album',
+            limit: 8,
+          },
+          timeout: 4000,
+        });
+
+        const albums = res.data?.results || [];
+
+        // Find an album representing the soundtrack with > 2 tracks (not a 1-song single)
+        const matchedAlbum =
+          albums.find((a: any) => {
+            const name = (a.collectionName || '').toLowerCase();
+            const artist = (a.artistName || '').toLowerCase();
+            const count = a.trackCount || 0;
+
+            const isSoundtrack =
+              name.includes('soundtrack') ||
+              name.includes('ost') ||
+              name.includes('score') ||
+              name.includes('music from') ||
+              artist.includes(titleLower);
+
+            const mentionsTitle =
+              name.includes(titleLower) ||
+              artist.includes(titleLower) ||
+              (origLower && (name.includes(origLower) || artist.includes(origLower)));
+
+            return isSoundtrack && mentionsTitle && count > 2;
+          }) ||
+          albums.find((a: any) => {
+            const name = (a.collectionName || '').toLowerCase();
+            const count = a.trackCount || 0;
+            return (name.includes('soundtrack') || name.includes('ost')) && count > 3;
+          });
+
+        if (matchedAlbum) {
+          const lookup = await axios.get('https://itunes.apple.com/lookup', {
+            params: {
+              id: matchedAlbum.collectionId,
+              entity: 'song',
+              limit: 25,
+            },
+            timeout: 4000,
+          });
+
+          const rawTracks = (lookup.data?.results || []).slice(1);
+          if (rawTracks.length > 0) {
+            const tracks: SoundtrackTrack[] = rawTracks.map((item: any, idx: number) => ({
+              songName: item.trackName || 'Untitled Track',
+              artist: item.artistName || matchedAlbum.artistName,
+              episodeRef: `From: ${matchedAlbum.collectionName}`,
+              popularityRank: item.trackNumber || idx + 1,
+              previewUrl: item.previewUrl || undefined,
+              albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
+              spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
+            }));
+
+            return tracks.slice(0, 16);
+          }
+        }
+      } catch {
+        // try next query
+      }
+    }
+
+    return [];
+  }
+
+  /**
+   * Get iconic soundtracks for any movie or TV series automatically.
    * Auto-enriches with official 30-second audio previews & artwork.
    */
-  public static async getSoundtracksForTitle(titleName: string): Promise<SoundtrackTrack[]> {
+  public static async getSoundtracksForTitle(
+    titleName: string,
+    originalName?: string
+  ): Promise<SoundtrackTrack[]> {
     const norm = titleName.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
 
-    // 1. Check curated iconic soundtracks first
+    // 1. Check curated iconic soundtracks first (for titles with bespoke scene descriptions)
     for (const [key, songs] of Object.entries(ICONIC_SOUNDTRACKS)) {
       const formattedKey = key.replace(/_/g, ' ');
       if (norm.includes(formattedKey) || formattedKey.includes(norm)) {
@@ -199,7 +301,17 @@ export class SoundtrackService {
       }
     }
 
-    // 2. Query iTunes API with multi-angle parallel searches
+    // 2. Automated Universal Album Discovery (Authentic OST albums across KDramas, Films, Western TV)
+    try {
+      const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName);
+      if (albumTracks.length > 0) {
+        return albumTracks;
+      }
+    } catch (albumErr: any) {
+      console.warn(`[SoundtrackService] Album discovery error for "${titleName}":`, albumErr.message);
+    }
+
+    // 3. Fallback: Multi-angle iTunes song search
     try {
       const queries = [
         `${titleName} soundtrack`,
@@ -262,7 +374,7 @@ export class SoundtrackService {
       // ignore network errors and fallback
     }
 
-    // 3. Fallback generic theme
+    // 4. Fallback generic theme
     const genericTheme = `${titleName} Official Main Theme & Score`;
     const genericAudio = await this.enrichTrackWithAudio(titleName, 'Original Soundtrack');
 

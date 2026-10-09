@@ -7,6 +7,7 @@ const TitleSchema = new Schema<ITitleDocument>(
   {
     tmdbId: { type: Number, required: true, index: true },
     name: { type: String, required: true, index: true },
+    originalName: { type: String },
     type: { type: String, enum: ['tv', 'film'], required: true, index: true },
     genres: { type: [String], default: [] },
     synopsis: { type: String, default: '' },

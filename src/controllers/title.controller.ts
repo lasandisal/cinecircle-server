@@ -257,6 +257,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
             const created = await Title.create({
               tmdbId: tmdbData.tmdbId,
               name: tmdbData.name,
+              originalName: tmdbData.originalName,
               type: tmdbData.type,
               genres: tmdbData.genres,
               synopsis: tmdbData.synopsis,
@@ -347,15 +348,29 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
 
     // 1. Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
     let finalSoundtracks = soundtracks;
-    const isRiverdale = title.name.toLowerCase().includes('riverdale');
+    const titleNameLower = title.name.toLowerCase();
+    const isRiverdale = titleNameLower.includes('riverdale');
+    const isBoysOverFlowers = titleNameLower.includes('boys over flowers');
+
+    // Detect if existing tracks are naive keyword matches (e.g. tracks repeating the title name instead of real OST tracks)
+    const matchingTitleCount = soundtracks.filter((s) =>
+      s.songName.toLowerCase().includes(titleNameLower)
+    ).length;
+    const isNaiveMatchesOnly = soundtracks.length > 0 && matchingTitleCount >= 2;
+
     const needsRefresh =
       soundtracks.length === 0 ||
       !soundtracks.some((s) => s.previewUrl) ||
-      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america')));
+      isNaiveMatchesOnly ||
+      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america'))) ||
+      (isBoysOverFlowers && !soundtracks.some((s) => s.songName.includes('파라다이스')));
 
     if (needsRefresh) {
       try {
-        const dynamicTracks = await SoundtrackService.getSoundtracksForTitle(title.name);
+        const dynamicTracks = await SoundtrackService.getSoundtracksForTitle(
+          title.name,
+          (title as any).originalName
+        );
         if (dynamicTracks.length > 0) {
           finalSoundtracks = dynamicTracks as any;
           if (titleObjId) {
@@ -536,7 +551,10 @@ export const getSeasonEpisodes = async (
       }
 
       if (baseEpisodes.length > 0) {
-        const songs = await SoundtrackService.getSoundtracksForTitle(title.name);
+        const songs = await SoundtrackService.getSoundtracksForTitle(
+          title.name,
+          (title as any).originalName
+        );
         const totalEps = baseEpisodes.length;
         const enriched = baseEpisodes.map((ep: any) => {
           const matched = SoundtrackService.matchSongForEpisode(
