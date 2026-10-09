@@ -18,5 +18,6 @@ export const ENV = {
   BREVO_SMTP_KEY: process.env.BREVO_SMTP_KEY || '',
   BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL || 'hello.cinecircle@gmail.com',
   BREVO_SENDER_NAME: process.env.BREVO_SENDER_NAME || 'CineCircle',
+  CURATOR_WEBHOOK_KEY: process.env.CURATOR_WEBHOOK_KEY || 'cinecircle_curator_secret_2026',
 };
 

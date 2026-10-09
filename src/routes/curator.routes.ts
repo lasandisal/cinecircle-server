@@ -4,12 +4,12 @@ import {
   moderateComment,
   getFlaggedComments,
 } from '../controllers/curator.controller';
-import { authenticate, requireRole } from '../middleware/auth.middleware';
+import { authenticate, requireRole, authenticateCuratorOrKey } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// Restricted to admin / curator
-router.post('/soundtracks', authenticate, requireRole('admin'), addCuratedSoundtrack);
+// Autonomous AI agent webhook or Admin authenticated
+router.post('/soundtracks', authenticateCuratorOrKey, addCuratedSoundtrack);
 router.get('/comments/flagged', authenticate, requireRole('admin'), getFlaggedComments);
 router.patch('/comments/:commentId/moderate', authenticate, requireRole('admin'), moderateComment);
 

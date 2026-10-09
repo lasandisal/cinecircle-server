@@ -85,3 +85,49 @@ export const requireRole = (...roles: UserRole[]) => {
     next();
   };
 };
+
+/**
+ * Curator Or Webhook Key Authentication Middleware
+ * Allows access if:
+ * 1. Header `x-curator-key` matches ENV.CURATOR_WEBHOOK_KEY, OR
+ * 2. Authorization header is `Bearer <CURATOR_WEBHOOK_KEY>`, OR
+ * 3. Valid Admin JWT token is provided.
+ */
+export const authenticateCuratorOrKey = (req: IAuthRequest, res: Response, next: NextFunction): void => {
+  const curatorKey = (req.headers['x-curator-key'] as string) || (req.headers['x-api-key'] as string);
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : undefined;
+
+  // 1. Check direct webhook secret key
+  if (
+    (curatorKey && curatorKey === ENV.CURATOR_WEBHOOK_KEY) ||
+    (bearerToken && bearerToken === ENV.CURATOR_WEBHOOK_KEY)
+  ) {
+    req.user = {
+      id: 'tasklet-autonomous-curator',
+      email: 'curator@tasklet.ai',
+      role: 'admin',
+    };
+    return next();
+  }
+
+  // 2. Fallback to standard Admin JWT verification
+  if (!bearerToken) {
+    return next(new AppError('Unauthorized: Provide x-curator-key header or Admin JWT token', 401));
+  }
+
+  try {
+    const decoded = jwt.verify(bearerToken, ENV.JWT_SECRET) as JwtPayload;
+    if (decoded.role !== 'admin') {
+      return next(new AppError('Forbidden: Admin role required for curator actions', 403));
+    }
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+    };
+    next();
+  } catch {
+    return next(new AppError('Unauthorized: Invalid token or curator key', 401));
+  }
+};
