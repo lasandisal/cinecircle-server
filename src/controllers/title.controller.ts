@@ -237,7 +237,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
     if (!title) {
       const tmdbIdNum = parseInt(titleId, 10);
       if (!isNaN(tmdbIdNum)) {
-        const tmdbData = await tmdbService.fetchDetails(tmdbIdNum, 'film');
+        const tmdbData = await tmdbService.fetchDetails(tmdbIdNum);
         if (tmdbData) {
           try {
             const created = await Title.create({
@@ -265,6 +265,21 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
               await WatchProvider.insertMany(providerDocs);
             }
 
+            // Also persist seasons for TV series
+            if (tmdbData.type === 'tv' && tmdbData.seasons && tmdbData.seasons.length > 0) {
+              const seasonDocs = tmdbData.seasons.map((s) => ({
+                title: created._id,
+                seasonNumber: s.seasonNumber,
+                episodes: Array.from({ length: Math.min(s.episodeCount || 10, 24) }, (_, idx) => ({
+                  episodeNumber: idx + 1,
+                  name: `Episode ${idx + 1}`,
+                  summary: `${tmdbData.name} - Season ${s.seasonNumber}, Episode ${idx + 1}`,
+                  runtimeMinutes: tmdbData.runtimeMinutes || 45,
+                })),
+              }));
+              await SeasonEpisode.insertMany(seasonDocs);
+            }
+
             title = created.toObject();
           } catch (dbErr) {
             // Handle race conditions or duplicate key error
@@ -280,15 +295,18 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
     }
 
     // Fetch related models concurrently
-    const [watchProviders, seasons, soundtracks, allComments] = await Promise.all([
-      WatchProvider.find({ title: title._id }).lean(),
-      SeasonEpisode.find({ title: title._id }).sort({ seasonNumber: 1 }).lean(),
-      Soundtrack.find({ title: title._id }).sort({ popularityRank: 1 }).lean(),
-      Comment.find({ title: title._id })
-        .populate('user', 'name email role')
-        .sort({ createdAt: 1 })
-        .lean(),
-    ]);
+    const titleObjId = title._id;
+    const [watchProviders, seasons, soundtracks, allComments] = titleObjId
+      ? await Promise.all([
+          WatchProvider.find({ title: titleObjId }).lean(),
+          SeasonEpisode.find({ title: titleObjId }).sort({ seasonNumber: 1 }).lean(),
+          Soundtrack.find({ title: titleObjId }).sort({ popularityRank: 1 }).lean(),
+          Comment.find({ title: titleObjId })
+            .populate('user', 'name email role')
+            .sort({ createdAt: 1 })
+            .lean(),
+        ])
+      : [[], [], [], []];
 
     // Group replies under top-level parent comments
     const parentComments: any[] = [];

@@ -26,6 +26,11 @@ export interface FormattedTmdbTitle {
     region: string;
     type: 'subscription' | 'rental' | 'purchase';
   }[];
+  seasons?: {
+    seasonNumber: number;
+    name: string;
+    episodeCount: number;
+  }[];
 }
 
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
@@ -164,67 +169,95 @@ class TmdbService {
   /**
    * Fetch full title details including cast & watch providers
    */
-  public async fetchDetails(tmdbId: number, type: 'film' | 'tv'): Promise<FormattedTmdbTitle | null> {
+  public async fetchDetails(
+    tmdbId: number,
+    type?: 'film' | 'tv'
+  ): Promise<FormattedTmdbTitle | null> {
     const fallbackMatch = SEED_TITLES.find((t) => t.tmdbId === tmdbId);
     if (!this.hasApiKey()) {
       return (fallbackMatch as FormattedTmdbTitle) || null;
     }
 
-    const tmdbType = type === 'film' ? 'movie' : 'tv';
-    try {
-      const endpoint = `${TMDB_BASE_URL}/${tmdbType}/${tmdbId}`;
-      const response = await axios.get(
-        endpoint,
-        this.getRequestConfig({
-          append_to_response: 'credits,watch/providers',
-        })
-      );
+    // Try specified type first, then fallback to other type (e.g. movie -> tv or tv -> movie)
+    const typesToTry: ('movie' | 'tv')[] =
+      type === 'tv' ? ['tv', 'movie'] : ['movie', 'tv'];
 
-      const data = response.data;
-      const isMovie = tmdbType === 'movie';
+    for (const tmdbType of typesToTry) {
+      try {
+        const endpoint = `${TMDB_BASE_URL}/${tmdbType}/${tmdbId}`;
+        const response = await axios.get(
+          endpoint,
+          this.getRequestConfig({
+            append_to_response: 'credits,watch/providers',
+          })
+        );
 
-      // Parse Cast
-      const rawCast = data.credits?.cast || [];
-      const cast = rawCast.slice(0, 8).map((c: any) => ({
-        actorName: c.name || '',
-        characterName: c.character || '',
-        photoUrl: c.profile_path ? `${TMDB_IMAGE_BASE}${c.profile_path}` : undefined,
-      }));
+        const data = response.data;
+        if (!data || (!data.title && !data.name)) {
+          continue;
+        }
 
-      // Parse Watch Providers (US & LK priority)
-      const providersData = data['watch/providers']?.results || {};
-      const regional = providersData['US'] || providersData['LK'] || Object.values(providersData)[0] || {};
-      const flatrate = (regional as any).flatrate || [];
+        const isMovie = tmdbType === 'movie';
 
-      const watchProviders = flatrate.map((p: any) => ({
-        service: p.provider_name || 'Streaming',
-        region: 'US',
-        type: 'subscription' as const,
-      }));
+        // Parse Cast
+        const rawCast = data.credits?.cast || [];
+        const cast = rawCast.slice(0, 10).map((c: any) => ({
+          actorName: c.name || '',
+          characterName: c.character || '',
+          photoUrl: c.profile_path ? `${TMDB_IMAGE_BASE}${c.profile_path}` : undefined,
+        }));
 
-      const genres = (data.genres || []).map((g: any) => g.name);
+        // Parse Watch Providers (US & LK priority)
+        const providersData = data['watch/providers']?.results || {};
+        const regional = providersData['US'] || providersData['LK'] || Object.values(providersData)[0] || {};
+        const flatrate = (regional as any).flatrate || [];
 
-      return {
-        tmdbId: data.id,
-        name: isMovie ? data.title : data.name,
-        type: isMovie ? 'film' : 'tv',
-        genres,
-        synopsis: data.overview || '',
-        runtimeMinutes: isMovie ? data.runtime || 120 : (data.episode_run_time?.[0] || 50),
-        releaseYear: isMovie
-          ? parseInt((data.release_date || '2024').substring(0, 4), 10)
-          : parseInt((data.first_air_date || '2024').substring(0, 4), 10),
-        voteAverage: Math.round((data.vote_average || 7.5) * 10) / 10,
-        posterUrl: data.poster_path ? `${TMDB_IMAGE_BASE}${data.poster_path}` : '',
-        backdropUrl: data.backdrop_path ? `${TMDB_BACKDROP_BASE}${data.backdrop_path}` : '',
-        moodTags: fallbackMatch ? fallbackMatch.moodTags : this.generateMoodTags(genres),
-        cast,
-        watchProviders: watchProviders.length > 0 ? watchProviders : (fallbackMatch?.watchProviders || []),
-      };
-    } catch (err: any) {
-      console.warn(`[TmdbService] Failed fetching TMDB ID ${tmdbId}, using fallback:`, err.message);
-      return (fallbackMatch as FormattedTmdbTitle) || null;
+        const watchProviders = flatrate.map((p: any) => ({
+          service: p.provider_name || 'Streaming',
+          region: 'US',
+          type: 'subscription' as const,
+        }));
+
+        const genres = (data.genres || []).map((g: any) => g.name);
+
+        // Parse Seasons if TV
+        const seasons =
+          !isMovie && Array.isArray(data.seasons)
+            ? data.seasons
+                .filter((s: any) => s.season_number > 0)
+                .map((s: any) => ({
+                  seasonNumber: s.season_number,
+                  name: s.name || `Season ${s.season_number}`,
+                  episodeCount: s.episode_count || 10,
+                }))
+            : [];
+
+        return {
+          tmdbId: data.id,
+          name: isMovie ? data.title : data.name,
+          type: isMovie ? 'film' : 'tv',
+          genres,
+          synopsis: data.overview || '',
+          runtimeMinutes: isMovie ? data.runtime || 120 : (data.episode_run_time?.[0] || 45),
+          releaseYear: isMovie
+            ? parseInt((data.release_date || '2024').substring(0, 4), 10)
+            : parseInt((data.first_air_date || '2024').substring(0, 4), 10),
+          voteAverage: Math.round((data.vote_average || 7.5) * 10) / 10,
+          posterUrl: data.poster_path ? `${TMDB_IMAGE_BASE}${data.poster_path}` : '',
+          backdropUrl: data.backdrop_path ? `${TMDB_BACKDROP_BASE}${data.backdrop_path}` : '',
+          moodTags: fallbackMatch ? fallbackMatch.moodTags : this.generateMoodTags(genres),
+          cast,
+          watchProviders: watchProviders.length > 0 ? watchProviders : (fallbackMatch?.watchProviders || []),
+          seasons,
+        };
+      } catch (err: any) {
+        // Continue to try the alternate type (movie vs tv)
+        continue;
+      }
     }
+
+    console.warn(`[TmdbService] TMDB ID ${tmdbId} not found under movie or tv, using fallback`);
+    return (fallbackMatch as FormattedTmdbTitle) || null;
   }
 
   /**
