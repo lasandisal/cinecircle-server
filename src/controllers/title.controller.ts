@@ -274,6 +274,12 @@ function isSoundtrackVerified(title: any, soundtracks: any[]): boolean {
     if (titleNameLower.includes('riverdale') && !soundtracks.some((st) => st.songName.toLowerCase().includes('kids in america'))) {
       return false;
     }
+    if (titleNameLower.includes('gossip girl') && !soundtracks.some((st) => st.songName.toLowerCase().includes('road to nowhere'))) {
+      return false;
+    }
+    if (titleNameLower.includes('lucifer') && !soundtracks.some((st) => st.songName.toLowerCase().includes('hell') || st.songName.toLowerCase().includes('breath'))) {
+      return false;
+    }
   }
 
   // 4. Reject naive repetitions (e.g. tracks repeating title name instead of real songs)

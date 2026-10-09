@@ -108,15 +108,16 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
   ],
   gossip_girl: [
     { songName: 'Whatcha Say', artist: 'Jason Derulo', episodeRef: 'Season 3 Episode 11 - The Iconic Thanksgiving Dinner Climax', popularityRank: 1 },
-    { songName: 'Apologize', artist: 'Timbaland & OneRepublic', episodeRef: 'Season 1 Episode 10 - Dan & Serena Debutante Ball', popularityRank: 2 },
-    { songName: 'With Me', artist: 'Sum 41', episodeRef: 'Season 1 Episode 7 - Chuck & Blair Limo Scene', popularityRank: 3 },
-    { songName: 'Young Folks', artist: 'Peter Bjorn and John', episodeRef: 'Pilot - Serena Arrives at Grand Central', popularityRank: 4 },
-    { songName: 'Rolling in the Deep', artist: 'Adele', episodeRef: 'Season 4 Finale - Blair & Chuck / Dan Confrontation', popularityRank: 5 },
-    { songName: 'Sour Cherry', artist: 'The Kills', episodeRef: 'Season 1 - OMFGG Album Opening', popularityRank: 6 },
-    { songName: 'Paparazzi', artist: 'Lady Gaga', episodeRef: 'Season 3 Episode 4 - Secret Society', popularityRank: 7 },
-    { songName: 'Video Games', artist: 'Lana Del Rey', episodeRef: "Season 5 Episode 6 - Chuck's Apology to Blair", popularityRank: 8 },
-    { songName: 'Three Wishes', artist: 'The Pierces', episodeRef: "Season 1 Episode 3 - Blair's Sleepover", popularityRank: 9 },
-    { songName: 'Do You Wanna', artist: 'The Kooks', episodeRef: 'Season 1 - OMFGG Album', popularityRank: 10 },
+    { songName: 'Road to Nowhere', artist: 'Talking Heads', episodeRef: 'Season 1 Episode 1 - Serena & Dan Road Trip to The Hamptons', popularityRank: 2 },
+    { songName: 'Apologize', artist: 'Timbaland & OneRepublic', episodeRef: 'Season 1 Episode 10 - Dan & Serena Debutante Ball', popularityRank: 3 },
+    { songName: 'With Me', artist: 'Sum 41', episodeRef: 'Season 1 Episode 7 - Chuck & Blair Limo Scene', popularityRank: 4 },
+    { songName: 'Young Folks', artist: 'Peter Bjorn and John', episodeRef: 'Pilot - Serena Arrives at Grand Central', popularityRank: 5 },
+    { songName: 'Rolling in the Deep', artist: 'Adele', episodeRef: 'Season 4 Finale - Blair & Chuck / Dan Confrontation', popularityRank: 6 },
+    { songName: 'Sour Cherry', artist: 'The Kills', episodeRef: 'Season 1 - OMFGG Album Opening', popularityRank: 7 },
+    { songName: 'Paparazzi', artist: 'Lady Gaga', episodeRef: 'Season 3 Episode 4 - Secret Society', popularityRank: 8 },
+    { songName: 'Video Games', artist: 'Lana Del Rey', episodeRef: "Season 5 Episode 6 - Chuck's Apology to Blair", popularityRank: 9 },
+    { songName: 'Three Wishes', artist: 'The Pierces', episodeRef: "Season 1 Episode 3 - Blair's Sleepover", popularityRank: 10 },
+    { songName: 'Do You Wanna', artist: 'The Kooks', episodeRef: 'Season 1 - OMFGG Album', popularityRank: 11 },
   ],
   greys_anatomy: [
     { songName: 'Chasing Cars', artist: 'Snow Patrol', episodeRef: 'Season 2 Finale - Denny Duquette Climax', popularityRank: 1 },
@@ -168,15 +169,20 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
   ],
   lucifer: [
     { songName: 'Being Evil Has a Price', artist: 'Heavy Young Heathens', episodeRef: 'Main Title Opening Theme', popularityRank: 1 },
-    { songName: 'Creep', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 4 Episode 1 - Lux Piano Solo', popularityRank: 2 },
-    { songName: 'Sinnerman', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 1 Episode 6 - Lux Piano Climax', popularityRank: 3 },
-    { songName: 'All Along the Watchtower', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 2 Episode 1 - Amenadiel & Lucifer Piano Duet', popularityRank: 4 },
-    { songName: "Ain't No Rest for the Wicked", artist: 'Cage the Elephant', episodeRef: 'Pilot Episode - Lucifer Driving into LA', popularityRank: 5 },
-    { songName: 'Unshaken', artist: "D'Angelo", episodeRef: 'Season 4 Episode 1 - Closing Montage', popularityRank: 6 },
-    { songName: 'My Love Will Never Die', artist: 'Claire Wyndham', episodeRef: "Season 4 Finale - Lucifer & Chloe's Sacrifice", popularityRank: 7 },
-    { songName: 'Wicked Game', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 5 Episode 10 - Lux Performance', popularityRank: 8 },
-    { songName: 'I Will Survive', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 3 Episode 17 - Axara & Lucifer Duet', popularityRank: 9 },
-    { songName: 'Sanctuary', artist: 'Welshly Arms', episodeRef: 'Season 4 Episode 10 - Demon Showdown', popularityRank: 10 },
+    { songName: 'Every Breath You Take', artist: 'Lucifer Cast & Tom Ellis & Debbie Gibson', episodeRef: "Season 5 Episode 10 - Bloody Celestial Karaoke / 'I'll Be Watching You'", popularityRank: 2 },
+    { songName: 'Hell', artist: 'Lucifer Cast & Squirrel Nut Zippers', episodeRef: 'Season 5 Episode 10 - Dan & Amenadiel Karaoke / Lux', popularityRank: 3 },
+    { songName: 'Creep', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 4 Episode 1 - Lux Piano Solo', popularityRank: 4 },
+    { songName: 'Sinnerman', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 1 Episode 6 - Lux Piano Climax', popularityRank: 5 },
+    { songName: "Ain't No Rest for the Wicked", artist: 'Cage the Elephant', episodeRef: 'Pilot Episode - Lucifer Driving into LA', popularityRank: 6 },
+    { songName: 'All Along the Watchtower', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 2 Episode 1 - Amenadiel & Lucifer Piano Duet', popularityRank: 7 },
+    { songName: 'Knockin’ on Heaven’s Door', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 2 Episode 9 - Lucifer Piano Tribute to Father Frank', popularityRank: 8 },
+    { songName: 'Wicked Game', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 5 Episode 10 - Lux Performance', popularityRank: 9 },
+    { songName: 'I Will Survive', artist: 'Lucifer Cast & Tom Ellis', episodeRef: 'Season 3 Episode 17 - Axara & Lucifer Duet', popularityRank: 10 },
+    { songName: 'Wonderwall', artist: 'Lucifer Cast & Lesley-Ann Brandt', episodeRef: "Season 5 Episode 4 - Maze's Heartfelt Song to Eve", popularityRank: 11 },
+    { songName: 'Heart and Soul', artist: 'Lucifer Cast & Tom Ellis & Lauren German', episodeRef: 'Season 1 Episode 9 - Lucifer & Chloe Piano Duet', popularityRank: 12 },
+    { songName: 'Unshaken', artist: "D'Angelo", episodeRef: 'Season 4 Episode 1 - Closing Montage', popularityRank: 13 },
+    { songName: 'My Love Will Never Die', artist: 'Claire Wyndham', episodeRef: "Season 4 Finale - Lucifer & Chloe's Sacrifice", popularityRank: 14 },
+    { songName: 'Sanctuary', artist: 'Welshly Arms', episodeRef: 'Season 4 Episode 10 - Demon Showdown', popularityRank: 15 },
   ],
   the_originals: [
     { songName: 'Devils Work', artist: 'Miike Snow', episodeRef: 'Season 1 Episode 1 - Klaus Returns to New Orleans', popularityRank: 1 },
@@ -318,8 +324,11 @@ export class SoundtrackService {
     if (mediaType === 'tv') {
       queries = [
         `${cleanTitle} Cast`,
+        `OMFGG ${cleanTitle}`,
+        `${cleanTitle}: Seasons`,
         `${cleanTitle}: Season`,
         `${cleanTitle} Season 1`,
+        `Music from ${cleanTitle}`,
         ...wikiCandidates.slice(0, 3),
         originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
         originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
@@ -327,7 +336,6 @@ export class SoundtrackService {
         `${cleanTitle} Original Series Soundtrack`,
         `${cleanTitle} (Music from the TV Series)`,
         `${cleanTitle} (Music from the Series)`,
-        `Music from ${cleanTitle}`,
         `${cleanTitle} Soundtrack`,
         `${cleanTitle} OST`,
         cleanTitle,
@@ -347,7 +355,9 @@ export class SoundtrackService {
       ].filter(Boolean) as string[];
     }
 
-    // 3. Search iTunes for a verified album
+    // 3. Search iTunes for verified albums (collect up to 3 distinct albums, e.g. seasons, volumes, special karaoke)
+    const albumMap = new Map<number, any>();
+
     for (const q of queries) {
       try {
         const res = await axios.get('https://itunes.apple.com/search', {
@@ -356,24 +366,21 @@ export class SoundtrackService {
         });
 
         const albums = res.data?.results || [];
-        const matchedAlbum = albums.find((a: any) => {
+        for (const a of albums) {
           const name = (a.collectionName || '').toLowerCase();
           const artist = (a.artistName || '').toLowerCase();
           const count = a.trackCount || 0;
 
           // Disqualify cross-medium false positives:
-          // A TV show must NEVER accept a "Motion Picture" / "Film" soundtrack
           if (mediaType === 'tv' && (name.includes('motion picture') || name.includes('movie soundtrack'))) {
-            return false;
+            continue;
           }
-          // A Film must NEVER accept an "Original Television Soundtrack" / "Series Soundtrack"
           if (mediaType === 'film' && (name.includes('television') || name.includes('series soundtrack') || name.includes('season '))) {
-            return false;
+            continue;
           }
 
-          // Disqualify if artist name is simply identical to title name (e.g. band "The Heirs") unless it says Cast or Soundtrack
           if (artist === titleLower && !artist.includes('cast') && !name.includes('soundtrack') && !name.includes('score') && !name.includes('ost')) {
-            return false;
+            continue;
           }
 
           const isSoundtrack =
@@ -384,6 +391,8 @@ export class SoundtrackService {
             name.includes('television soundtrack') ||
             name.includes('series soundtrack') ||
             name.includes('motion picture') ||
+            name.includes('omfgg') ||
+            name.includes('karaoke') ||
             artist.includes('soundtrack') ||
             artist.includes('cast') ||
             artist.includes('various artists');
@@ -394,32 +403,54 @@ export class SoundtrackService {
             (origLower && (name.includes(origLower) || artist.includes(origLower))) ||
             (titleWords.length > 0 && titleWords.every((w) => name.includes(w) || artist.includes(w)));
 
-          return isSoundtrack && mentionsTitle && count > 2;
-        });
+          if (isSoundtrack && mentionsTitle && count > 2) {
+            if (!albumMap.has(a.collectionId)) {
+              albumMap.set(a.collectionId, a);
+            }
+          }
+        }
 
-        if (matchedAlbum) {
+        if (albumMap.size >= 3) break;
+      } catch {
+        // try next candidate
+      }
+    }
+
+    if (albumMap.size > 0) {
+      const allTracks: SoundtrackTrack[] = [];
+      const seenSongNames = new Set<string>();
+
+      for (const matchedAlbum of Array.from(albumMap.values()).slice(0, 3)) {
+        try {
           const lookup = await axios.get('https://itunes.apple.com/lookup', {
-            params: { id: matchedAlbum.collectionId, entity: 'song', limit: 25 },
+            params: { id: matchedAlbum.collectionId, entity: 'song', limit: 30 },
             timeout: 4000,
           });
 
           const rawTracks = (lookup.data?.results || []).slice(1);
-          if (rawTracks.length > 0) {
-            return rawTracks
-              .map((item: any, idx: number) => ({
-                songName: item.trackName || 'Untitled Track',
-                artist: item.artistName || matchedAlbum.artistName,
-                episodeRef: `From: ${matchedAlbum.collectionName}`,
-                popularityRank: item.trackNumber || idx + 1,
-                previewUrl: item.previewUrl || undefined,
-                albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
-                spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
-              }))
-              .slice(0, 16);
+          for (const item of rawTracks) {
+            const rawName = item.trackName || 'Untitled Track';
+            const normKey = rawName.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+            if (!normKey || seenSongNames.has(normKey)) continue;
+            seenSongNames.add(normKey);
+
+            allTracks.push({
+              songName: rawName,
+              artist: item.artistName || matchedAlbum.artistName,
+              episodeRef: `From: ${matchedAlbum.collectionName}`,
+              popularityRank: allTracks.length + 1,
+              previewUrl: item.previewUrl || undefined,
+              albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
+              spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
+            });
           }
+        } catch {
+          // ignore lookup error and continue
         }
-      } catch {
-        // try next candidate
+      }
+
+      if (allTracks.length > 0) {
+        return allTracks.slice(0, 35);
       }
     }
 
@@ -531,11 +562,11 @@ export class SoundtrackService {
         try {
           const albumTracks = await this.discoverAlbumSoundtrack(titleName, originalName, mediaType, releaseYear);
           if (albumTracks.length > 0) {
-            const seen = new Set(enriched.map((e) => e.songName.toLowerCase().trim()));
+            const seen = new Set(enriched.map((e) => e.songName.toLowerCase().replace(/[^a-z0-9]/g, '').trim()));
             const additional = albumTracks.filter(
-              (at) => !seen.has(at.songName.toLowerCase().trim())
+              (at) => !seen.has(at.songName.toLowerCase().replace(/[^a-z0-9]/g, '').trim())
             );
-            return [...enriched, ...additional].slice(0, 18);
+            return [...enriched, ...additional].slice(0, 35);
           }
         } catch {
           // keep enriched
