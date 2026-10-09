@@ -13,6 +13,7 @@ export class EmailService {
         host: ENV.BREVO_SMTP_HOST,
         port: ENV.BREVO_SMTP_PORT,
         secure: ENV.BREVO_SMTP_PORT === 465,
+        requireTLS: ENV.BREVO_SMTP_PORT === 587,
         auth: {
           user: ENV.BREVO_SMTP_LOGIN,
           pass: ENV.BREVO_SMTP_KEY,
