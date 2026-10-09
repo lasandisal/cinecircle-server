@@ -29,14 +29,14 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
     if (aiPrompt && typeof aiPrompt === 'string' && aiPrompt.trim()) {
       try {
         const parsed = await AiService.parseVibePrompt(aiPrompt.trim());
-        if (parsed.targetGenres?.length) {
-          targetGenres = parsed.targetGenres;
+        if (parsed.suggestedGenres?.length) {
+          targetGenres = parsed.suggestedGenres;
         }
-        if (parsed.maxRuntime) {
-          maxRuntime = parsed.maxRuntime;
+        if (parsed.maxRuntimeMinutes) {
+          maxRuntime = parsed.maxRuntimeMinutes;
         }
-        if (parsed.reasoning) {
-          rationalePrefix = parsed.reasoning;
+        if (parsed.rationale) {
+          rationalePrefix = parsed.rationale;
         }
       } catch (e) {
         // Fallback to keyword matching if AI rate limited

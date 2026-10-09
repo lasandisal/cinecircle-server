@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import {
   getProfile,
+  updateProfile,
+  searchPeople,
   updateTasteProfile,
   updateSubscribedServices,
   toggleFollow,
@@ -11,7 +13,10 @@ import { authenticate, optionalAuthenticate } from '../middleware/auth.middlewar
 const router = Router();
 
 router.get('/suggestions', optionalAuthenticate, getUserSuggestions);
-router.get('/:userId/profile', authenticate, getProfile);
+router.get('/search', optionalAuthenticate, searchPeople);
+router.get('/profile', authenticate, getProfile);
+router.put('/profile', authenticate, updateProfile);
+router.get('/:userId/profile', optionalAuthenticate, getProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
 router.post('/follow', authenticate, toggleFollow);

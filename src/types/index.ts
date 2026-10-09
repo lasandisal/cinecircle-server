@@ -9,6 +9,9 @@ export interface IUser {
   email: string;
   passwordHash: string;
   role: UserRole;
+  avatar?: string;
+  handle?: string;
+  bio?: string;
   tasteProfile?: Types.ObjectId;
   subscribedServices: string[];
   fatigueCount: number;

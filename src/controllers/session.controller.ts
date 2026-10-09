@@ -98,7 +98,7 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
 export const getSessionByCode = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { joinCode } = req.params;
-    const cleanCode = (joinCode || '').toUpperCase().trim();
+    const cleanCode = String(joinCode || '').toUpperCase().trim();
 
     const session = await Session.findOne({ joinCode: cleanCode })
       .populate('host', 'name email avatar')
