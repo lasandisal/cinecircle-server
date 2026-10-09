@@ -40,10 +40,7 @@ export class EmailService {
         ? 'Sign in to your CineCircle account'
         : 'Reset your CineCircle password';
 
-    const subject =
-      type === 'register'
-        ? `CineCircle Verification Code: ${otp}`
-        : `Your CineCircle Sign-In Code: ${otp}`;
+    const subject = `${otp} is your CineCircle verification code`;
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -120,9 +117,16 @@ export class EmailService {
       const info = await transporter.sendMail({
         from: `"${ENV.BREVO_SENDER_NAME}" <${ENV.BREVO_SENDER_EMAIL}>`,
         to: recipientEmail,
+        replyTo: ENV.BREVO_SENDER_EMAIL,
         subject,
         text: `Your CineCircle verification code is: ${otp}. It expires in 10 minutes.`,
         html: htmlContent,
+        headers: {
+          'X-Entity-Ref-ID': `${Date.now()}-${otp}`,
+          'X-Priority': '1',
+          'Importance': 'high',
+          'Auto-Submitted': 'auto-generated',
+        },
       });
 
       console.log(`\n==================================================`);
