@@ -4,6 +4,7 @@ import app from './app';
 import { ENV } from './config/env';
 import { connectDB } from './config/db';
 import { SocketService } from './services/socket.service';
+import { SeedService } from './services/SeedService';
 
 const server = http.createServer(app);
 
@@ -20,6 +21,9 @@ SocketService.initialize(io);
 const startServer = async () => {
   // Connect to MongoDB
   await connectDB();
+
+  // Auto-seed catalogue if empty
+  await SeedService.autoSeedIfEmpty();
 
   server.listen(ENV.PORT, () => {
     console.log(`[Server] CineCircle Backend is running on http://localhost:${ENV.PORT}`);

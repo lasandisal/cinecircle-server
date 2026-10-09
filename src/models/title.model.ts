@@ -12,6 +12,9 @@ const TitleSchema = new Schema<ITitleDocument>(
     synopsis: { type: String, default: '' },
     runtimeMinutes: { type: Number, default: 0 },
     posterUrl: { type: String, default: '' },
+    backdropUrl: { type: String, default: '' },
+    releaseYear: { type: Number },
+    voteAverage: { type: Number, default: 0 },
     moodTags: { type: [String], default: [] },
     cast: [
       {

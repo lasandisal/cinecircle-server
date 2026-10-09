@@ -64,6 +64,9 @@ export interface ITitle {
   runtimeMinutes: number;
   posterUrl: string;
   moodTags: string[];
+  backdropUrl?: string;
+  releaseYear?: number;
+  voteAverage?: number;
   cast: {
     actorName: string;
     characterName: string;
@@ -132,6 +135,7 @@ export interface IComment {
   title: Types.ObjectId;
   user: Types.ObjectId;
   text: string;
+  containsSpoilers?: boolean;
   reported: boolean;
   hidden: boolean;
   createdAt: Date;
