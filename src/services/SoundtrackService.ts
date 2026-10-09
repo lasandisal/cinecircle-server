@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { AiService } from './ai.service';
 
 export interface SoundtrackTrack {
   songName: string;
@@ -12,15 +11,37 @@ export interface SoundtrackTrack {
 }
 
 const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; episodeRef: string; popularityRank: number }[]> = {
+  riverdale: [
+    { songName: 'Kids in America', artist: 'KJ Apa & Camila Mendes', episodeRef: 'Season 1 Finale - Homecoming / Jubilee Performance', popularityRank: 1 },
+    { songName: 'Candy Girl (Sugar Sugar)', artist: 'Josie and the Pussycats', episodeRef: 'Season 1 Episode 2 - Pep Rally Performance', popularityRank: 2 },
+    { songName: 'Mad World', artist: 'KJ Apa, Camila Mendes & Lili Reinhart', episodeRef: "Season 2 - FP's Serpent Retirement Party at WhyTe Wyrm", popularityRank: 3 },
+    { songName: 'Milkshake', artist: 'Josie and the Pussycats & Cheryl Blossom', episodeRef: "Season 2 Episode 2 - Save Pop's Chock'lit Shoppe Roof Rally", popularityRank: 4 },
+    { songName: 'Jailhouse Rock', artist: 'Camila Mendes, Ashleigh Murray & Madelaine Petsch', episodeRef: "Season 3 Episode 2 - Archie's Juvenile Detention Football Game", popularityRank: 5 },
+    { songName: 'Seventeen', artist: 'Lili Reinhart & Cole Sprouse', episodeRef: 'Season 3 Episode 16 - Heathers the Musical Duet', popularityRank: 6 },
+    { songName: 'Cherry Bomb', artist: 'Madelaine Petsch, Camila Mendes & Vanessa Morgan', episodeRef: 'Season 4 Episode 7 - River Vixens Halftime Cheer Routine', popularityRank: 7 },
+    { songName: 'Bittersweet Symphony', artist: 'Ashleigh Murray & Camila Mendes', episodeRef: 'Season 2 Episode 10 - Veronica & Josie Cabaret Duet', popularityRank: 8 },
+  ],
   vampire_diaries: [
     { songName: 'Another Love', artist: 'Tom Odell', episodeRef: 'Season 6 Finale - Elena & Damon Farewell Road Dance', popularityRank: 1 },
-    { songName: 'Never Say Never', artist: 'The Fray', episodeRef: 'Season 1 Finale / Elena & Stefan', popularityRank: 2 },
-    { songName: 'All I Need', artist: 'Within Temptation', episodeRef: 'Season 1 - Miss Mystic Falls Damon & Elena Dance', popularityRank: 3 },
-    { songName: 'A Drop in the Ocean', artist: 'Ron Pope', episodeRef: 'Season 3 - Stefan Birthday Phone Call to Elena', popularityRank: 4 },
+    { songName: 'Never Say Never', artist: 'The Fray', episodeRef: 'Season 1 Finale - Elena & Stefan Intimate Scene', popularityRank: 2 },
+    { songName: 'All I Need', artist: 'Within Temptation', episodeRef: 'Season 1 Episode 19 - Miss Mystic Falls Damon & Elena Dance', popularityRank: 3 },
+    { songName: 'A Drop in the Ocean', artist: 'Ron Pope', episodeRef: 'Season 3 Episode 1 - Stefan Birthday Phone Call to Elena', popularityRank: 4 },
     { songName: 'Bloodstream', artist: 'Stateless', episodeRef: 'Season 1 Finale - Damon & Katherine Porch Scene', popularityRank: 5 },
     { songName: 'Skinny Love', artist: 'Birdy', episodeRef: "Season 2 Finale - Jenna's Funeral & John's Letter", popularityRank: 6 },
-    { songName: 'Hold On', artist: 'Chord Overstreet', episodeRef: 'Series Finale - Peace in the Afterlife', popularityRank: 7 },
-    { songName: 'Feel So Close', artist: 'Calvin Harris', episodeRef: 'Season 4 - College Blood-Feeding Party', popularityRank: 8 },
+    { songName: 'Hold On', artist: 'Chord Overstreet', episodeRef: 'Season 8 Finale - Peace in the Afterlife', popularityRank: 7 },
+    { songName: 'Feel So Close', artist: 'Calvin Harris', episodeRef: 'Season 4 Episode 4 - College Blood-Feeding Party', popularityRank: 8 },
+  ],
+  wednesday: [
+    { songName: 'Goo Goo Muck', artist: 'The Cramps', episodeRef: "Season 1 Episode 4 - Rave'N Dance Iconic Choreography", popularityRank: 1 },
+    { songName: 'Bloody Mary', artist: 'Lady Gaga', episodeRef: 'Viral TikTok Dance Trend & Fan Anthem', popularityRank: 2 },
+    { songName: 'Paint It Black', artist: 'Wednesday Addams', episodeRef: 'Season 1 Episode 1 - Balcony Cello Solo', popularityRank: 3 },
+    { songName: 'Nothing Else Matters', artist: 'Apocalyptica', episodeRef: 'Season 1 Episode 3 - Cello Duet Montage', popularityRank: 4 },
+  ],
+  euphoria: [
+    { songName: 'All for Us', artist: 'Labrinth & Zendaya', episodeRef: 'Season 1 Finale - Rue Marching Band Climax', popularityRank: 1 },
+    { songName: 'Still Don’t Know My Name', artist: 'Labrinth', episodeRef: 'Iconic Theme - Carnival & Glitter Tears', popularityRank: 2 },
+    { songName: 'Mount Everest', artist: 'Labrinth', episodeRef: 'Nate Jacobs Hallway Walk', popularityRank: 3 },
+    { songName: 'Right Down the Line', artist: 'Gerry Rafferty', episodeRef: 'Season 2 Opening Scene', popularityRank: 4 },
   ],
   friends: [
     { songName: "I'll Be There for You", artist: 'The Rembrandts', episodeRef: 'Main Theme & Central Perk Fountain', popularityRank: 1 },
@@ -62,6 +83,18 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'Paul’s Dream', artist: 'Hans Zimmer', episodeRef: 'Visions of the Golden Path & Chani', popularityRank: 1 },
     { songName: 'Ripples in the Sand', artist: 'Hans Zimmer', episodeRef: 'Shai-Hulud Sandworm Awakening', popularityRank: 2 },
     { songName: 'Leaving Caladan', artist: 'Hans Zimmer', episodeRef: 'House Atreides Departure Fleet', popularityRank: 3 },
+  ],
+  twilight: [
+    { songName: 'A Thousand Years', artist: 'Christina Perri', episodeRef: 'Breaking Dawn - Edward & Bella Forever', popularityRank: 1 },
+    { songName: 'Flightless Bird, American Mouth', artist: 'Iron & Wine', episodeRef: 'Prom Gazebo Slow Dance', popularityRank: 2 },
+    { songName: 'Supermassive Black Hole', artist: 'Muse', episodeRef: 'Cullen Family Thunderstorm Baseball Game', popularityRank: 3 },
+    { songName: 'Decode', artist: 'Paramore', episodeRef: 'End Credits & Forest Chase Theme', popularityRank: 4 },
+  ],
+  game_of_thrones: [
+    { songName: 'Main Title Theme', artist: 'Ramin Djawadi', episodeRef: 'Opening Map Clockwork Sequence', popularityRank: 1 },
+    { songName: 'Light of the Seven', artist: 'Ramin Djawadi', episodeRef: 'Season 6 Finale - Sept of Baelor Wildfire Climax', popularityRank: 2 },
+    { songName: 'The Rains of Castamere', artist: 'The National', episodeRef: 'Season 3 - The Red Wedding', popularityRank: 3 },
+    { songName: 'Jenny of Oldstones', artist: 'Florence + the Machine', episodeRef: 'Season 8 Episode 2 - Eve of the Battle of Winterfell', popularityRank: 4 },
   ],
   breaking_bad: [
     { songName: 'Baby Blue', artist: 'Badfinger', episodeRef: "Series Finale - Walter White's Final Lab Moment", popularityRank: 1 },
@@ -112,6 +145,32 @@ export class SoundtrackService {
   }
 
   /**
+   * Search iTunes music directly for user contribution
+   */
+  public static async searchItunes(query: string): Promise<SoundtrackTrack[]> {
+    if (!query || !query.trim()) return [];
+    try {
+      const q = encodeURIComponent(query.trim());
+      const res = await axios.get(
+        `https://itunes.apple.com/search?term=${q}&entity=song&limit=12`,
+        { timeout: 3500 }
+      );
+      const results = res.data?.results || [];
+      return results.map((item: any, idx: number) => ({
+        songName: item.trackName || 'Unknown Title',
+        artist: item.artistName || 'Unknown Artist',
+        episodeRef: item.collectionName ? `From: ${item.collectionName}` : undefined,
+        popularityRank: idx + 1,
+        previewUrl: item.previewUrl || undefined,
+        albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
+        spotifyUrl: item.trackViewUrl || undefined,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Get iconic soundtracks for any movie or TV series.
    * Auto-enriches with official 30-second audio previews & artwork.
    */
@@ -140,25 +199,64 @@ export class SoundtrackService {
       }
     }
 
-    // 2. Query iTunes API directly for dynamic soundtrack discovery
+    // 2. Query iTunes API with multi-angle parallel searches
     try {
-      const q = encodeURIComponent(`${titleName} soundtrack`);
-      const res = await axios.get(
-        `https://itunes.apple.com/search?term=${q}&entity=song&limit=6`,
-        { timeout: 4000 }
+      const queries = [
+        `${titleName} soundtrack`,
+        `${titleName} Cast`,
+        `${titleName} Original Series Soundtrack`,
+      ];
+
+      const searchPromises = queries.map((q) =>
+        axios
+          .get(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=25`, {
+            timeout: 4000,
+          })
+          .then((res) => res.data?.results || [])
+          .catch(() => [])
       );
 
-      const items = res.data?.results;
-      if (Array.isArray(items) && items.length > 0) {
-        return items.map((item: any, idx: number) => ({
-          songName: item.trackName || `${titleName} Theme`,
-          artist: item.artistName || 'Original Soundtrack',
-          episodeRef: item.collectionName ? `From: ${item.collectionName}` : 'Featured in Soundtrack',
-          popularityRank: idx + 1,
-          previewUrl: item.previewUrl || undefined,
-          albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
-          spotifyUrl: item.trackViewUrl || undefined,
-        }));
+      const allResultsArrays = await Promise.all(searchPromises);
+      const combinedResults = allResultsArrays.flat();
+
+      const seen = new Set<string>();
+      const dynamicTracks: SoundtrackTrack[] = [];
+
+      for (const item of combinedResults) {
+        const rawTrack = (item.trackName || '').trim();
+        const key = rawTrack.toLowerCase();
+        if (!key || seen.has(key)) continue;
+
+        const coll = (item.collectionName || '').toLowerCase();
+        const art = (item.artistName || '').toLowerCase();
+        const titleLower = titleName.toLowerCase();
+
+        // Check if track is genuinely related to this movie/series
+        const isRelated =
+          coll.includes(titleLower) ||
+          art.includes(titleLower) ||
+          key.includes(titleLower) ||
+          coll.includes('soundtrack') ||
+          coll.includes('score');
+
+        if (isRelated) {
+          seen.add(key);
+          dynamicTracks.push({
+            songName: rawTrack,
+            artist: item.artistName || 'Original Soundtrack',
+            episodeRef: item.collectionName ? `From: ${item.collectionName}` : 'Featured in Soundtrack',
+            popularityRank: dynamicTracks.length + 1,
+            previewUrl: item.previewUrl || undefined,
+            albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
+            spotifyUrl: item.trackViewUrl || undefined,
+          });
+
+          if (dynamicTracks.length >= 12) break;
+        }
+      }
+
+      if (dynamicTracks.length > 0) {
+        return dynamicTracks;
       }
     } catch {
       // ignore network errors and fallback
@@ -180,4 +278,74 @@ export class SoundtrackService {
       },
     ];
   }
+
+  /**
+   * Intelligently match a soundtrack to an episode based on season number, episode number,
+   * total episodes in season (e.g. finale detection), and episode name keywords.
+   */
+  public static matchSongForEpisode(
+    songs: SoundtrackTrack[],
+    seasonNumber: number,
+    episodeNumber: number,
+    totalEpisodesInSeason: number,
+    episodeName?: string
+  ): SoundtrackTrack | undefined {
+    if (!songs || songs.length === 0) return undefined;
+
+    const isFinale = episodeNumber === totalEpisodesInSeason && totalEpisodesInSeason > 1;
+    const nameLower = (episodeName || '').toLowerCase();
+
+    // 1. Check for exact season finale match
+    if (isFinale) {
+      const finaleSong = songs.find((s) => {
+        const ref = (s.episodeRef || '').toLowerCase();
+        return (
+          (ref.includes(`season ${seasonNumber}`) || ref.includes(`s${seasonNumber}`)) &&
+          (ref.includes('finale') || ref.includes('end') || ref.includes('climax'))
+        );
+      });
+      if (finaleSong) return finaleSong;
+    }
+
+    // 2. Check for exact season + episode number match (e.g. "Season 1 Episode 2" or "S1E2")
+    const epNumSong = songs.find((s) => {
+      const ref = (s.episodeRef || '').toLowerCase();
+      const seasonMatch = ref.includes(`season ${seasonNumber}`) || ref.includes(`s${seasonNumber}`);
+      const episodeMatch =
+        ref.includes(`episode ${episodeNumber}`) ||
+        ref.includes(`ep ${episodeNumber}`) ||
+        ref.includes(`ep.${episodeNumber}`) ||
+        ref.includes(`e${episodeNumber}`);
+      return seasonMatch && episodeMatch;
+    });
+    if (epNumSong) return epNumSong;
+
+    // 3. Check for episode name match (e.g. "Homecoming", "Miss Mystic Falls", "Sweet Hereafter")
+    if (episodeName && episodeName.length > 3) {
+      const nameSong = songs.find((s) => {
+        const ref = (s.episodeRef || '').toLowerCase();
+        const words = nameLower
+          .replace(/chapter \w+:\s*/gi, '')
+          .split(/[\s,–—\-:]+/)
+          .filter((w) => w.length > 3 && !['season', 'episode', 'part', 'the', 'and', 'with'].includes(w));
+        return words.some((w) => ref.includes(w));
+      });
+      if (nameSong) return nameSong;
+    }
+
+    // 4. Check for any song associated with this season
+    const seasonSongs = songs.filter((s) => {
+      const ref = (s.episodeRef || '').toLowerCase();
+      return ref.includes(`season ${seasonNumber}`) || ref.includes(`s${seasonNumber}`);
+    });
+    if (seasonSongs.length > 0) {
+      return seasonSongs[(episodeNumber - 1) % seasonSongs.length];
+    }
+
+    // 5. Fallback: distribute the title's top soundtracks, prioritizing tracks with audio previews
+    const tracksWithPreview = songs.filter((s) => s.previewUrl);
+    const pool = tracksWithPreview.length > 0 ? tracksWithPreview : songs;
+    return pool[(episodeNumber - 1) % pool.length];
+  }
 }
+

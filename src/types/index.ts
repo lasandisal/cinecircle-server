@@ -91,6 +91,9 @@ export interface ISeasonEpisode {
       songName: string;
       artist: string;
       sceneRef?: string;
+      previewUrl?: string;
+      albumArtUrl?: string;
+      spotifyUrl?: string;
     };
   }[];
 }

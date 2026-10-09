@@ -215,80 +215,6 @@ export const getGenres = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; episodeRef: string; popularityRank: number }[]> = {
-  friends: [
-    { songName: "I'll Be There for You", artist: 'The Rembrandts', episodeRef: 'Main Theme & Central Perk Fountain', popularityRank: 1 },
-    { songName: 'Smelly Cat', artist: 'Phoebe Buffay (Lisa Kudrow)', episodeRef: 'Central Perk Live Gig & Music Video', popularityRank: 2 },
-    { songName: 'With or Without You', artist: 'U2', episodeRef: 'Ross Radio Dedication to Rachel', popularityRank: 3 },
-    { songName: 'Wicked Game', artist: 'Chris Isaak', episodeRef: 'Hayden Planetarium Date Scene', popularityRank: 4 },
-    { songName: 'Angel of the Morning', artist: 'Juice Newton', episodeRef: 'Central Perk Flashback Coffee Bar', popularityRank: 5 },
-    { songName: 'Shiny Happy People', artist: 'R.E.M.', episodeRef: 'Green Apartment Celebration Party', popularityRank: 6 },
-    { songName: 'You Were Meant for Me', artist: 'Jewel', episodeRef: 'Central Perk Heart-to-Heart', popularityRank: 7 },
-  ],
-  stranger_things: [
-    { songName: 'Running Up That Hill (A Deal with God)', artist: 'Kate Bush', episodeRef: "Season 4 - Max's Mind Lair Escape", popularityRank: 1 },
-    { songName: 'Master of Puppets', artist: 'Metallica', episodeRef: "Season 4 - Eddie's Upside Down Guitar Solo", popularityRank: 2 },
-    { songName: 'Should I Stay or Should I Go', artist: 'The Clash', episodeRef: 'Season 1 - Castle Byers Transmission', popularityRank: 3 },
-    { songName: 'Every Breath You Take', artist: 'The Police', episodeRef: 'Season 2 - Snow Ball 1984', popularityRank: 4 },
-  ],
-  the_bear: [
-    { songName: 'New Noise', artist: 'Refused', episodeRef: 'Kitchen High-Pressure Rush Hour', popularityRank: 1 },
-    { songName: 'Spiders (Kidsmoke)', artist: 'Wilco', episodeRef: 'Opening Morning Prep Montage', popularityRank: 2 },
-    { songName: 'Let Down', artist: 'Radiohead', episodeRef: 'Season 1 Finale Family Dinner Service', popularityRank: 3 },
-    { songName: 'Love Story (Taylor’s Version)', artist: 'Taylor Swift', episodeRef: "Season 2 - Richie's Staging Breakthrough Drive", popularityRank: 4 },
-  ],
-  succession: [
-    { songName: 'Succession Main Title Theme', artist: 'Nicholas Britell', episodeRef: 'Roy Family Empire Opening Theme', popularityRank: 1 },
-    { songName: 'Andante Risoluto', artist: 'Nicholas Britell', episodeRef: 'Season 2 Boardroom Showdown', popularityRank: 2 },
-    { songName: 'Honesty', artist: 'Billy Joel', episodeRef: "Kendall's 40th Birthday Party", popularityRank: 3 },
-  ],
-  arcane: [
-    { songName: 'Enemy', artist: 'Imagine Dragons & JID', episodeRef: 'Opening Theme & Zaun Underworld', popularityRank: 1 },
-    { songName: 'Guns for Hire', artist: 'Woodkid', episodeRef: "Silco & Jinx's Pivotal River Pier Scene", popularityRank: 2 },
-    { songName: 'What Could Have Been', artist: 'Sting & Ray Chen', episodeRef: 'Season 1 Climactic Finale Feast', popularityRank: 3 },
-  ],
-  interstellar: [
-    { songName: 'Cornfield Chase', artist: 'Hans Zimmer', episodeRef: 'Drone Pursuit Through the Cornfield', popularityRank: 1 },
-    { songName: 'No Time for Caution', artist: 'Hans Zimmer', episodeRef: 'Endurance Spinning Docking Sequence', popularityRank: 2 },
-    { songName: 'Stay', artist: 'Hans Zimmer', episodeRef: "Murph's Bedroom Departure Farewell", popularityRank: 3 },
-  ],
-  dune: [
-    { songName: 'Paul’s Dream', artist: 'Hans Zimmer', episodeRef: 'Visions of the Golden Path & Chani', popularityRank: 1 },
-    { songName: 'Ripples in the Sand', artist: 'Hans Zimmer', episodeRef: 'Shai-Hulud Sandworm Awakening', popularityRank: 2 },
-    { songName: 'Leaving Caladan', artist: 'Hans Zimmer', episodeRef: 'House Atreides Departure Fleet', popularityRank: 3 },
-  ],
-  vampire_diaries: [
-    { songName: 'Never Say Never', artist: 'The Fray', episodeRef: 'Season 1 Finale / Elena & Stefan', popularityRank: 1 },
-    { songName: 'All I Need', artist: 'Within Temptation', episodeRef: 'Season 1 - Miss Mystic Falls Damon & Elena Dance', popularityRank: 2 },
-    { songName: 'A Drop in the Ocean', artist: 'Ron Pope', episodeRef: 'Season 3 - Stefan Birthday Phone Call to Elena', popularityRank: 3 },
-    { songName: 'Bloodstream', artist: 'Stateless', episodeRef: 'Season 1 Finale - Damon & Katherine Porch Scene', popularityRank: 4 },
-    { songName: 'Skinny Love', artist: 'Birdy', episodeRef: "Season 2 Finale - Jenna's Funeral & John's Letter", popularityRank: 5 },
-    { songName: 'Hold On', artist: 'Chord Overstreet', episodeRef: 'Series Finale - Peace in the Afterlife', popularityRank: 6 },
-  ],
-};
-
-const getCuratedSoundtracks = (titleName: string) => {
-  const norm = titleName.toLowerCase();
-  for (const [key, songs] of Object.entries(ICONIC_SOUNDTRACKS)) {
-    if (norm.includes(key.replace(/_/g, ' ')) || key.includes(norm)) {
-      return songs;
-    }
-  }
-  return [
-    {
-      songName: `${titleName} Official Main Theme & Suite`,
-      artist: 'Original Motion Picture Score',
-      episodeRef: 'Main Title / Opening Scene',
-      popularityRank: 1,
-    },
-    {
-      songName: `${titleName} End Credits Symphonic Suite`,
-      artist: 'Original Motion Picture Soundtrack',
-      episodeRef: 'Closing Credits Sequence',
-      popularityRank: 2,
-    },
-  ];
-};
 
 /**
  * Get full title details including watch providers, seasons/episodes, soundtracks, and comments
@@ -419,45 +345,15 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    // Auto-enrich Season 1 episodes with real TMDB data if only placeholder names exist
-    if (title.type === 'tv' && title.tmdbId && seasons.length > 0) {
-      const firstSeason = seasons[0];
-      const hasGenericEpisodes =
-        !firstSeason.episodes ||
-        firstSeason.episodes.length === 0 ||
-        firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
-
-      if (hasGenericEpisodes) {
-        try {
-          const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, firstSeason.seasonNumber);
-          if (tmdbSeason && tmdbSeason.episodes.length > 0) {
-            const songs = getCuratedSoundtracks(title.name);
-            const enriched = tmdbSeason.episodes.map((ep, idx) => ({
-              ...ep,
-              featuredSong: songs[idx % songs.length]
-                ? {
-                    songName: songs[idx % songs.length].songName,
-                    artist: songs[idx % songs.length].artist,
-                    sceneRef: songs[idx % songs.length].episodeRef,
-                  }
-                : undefined,
-            }));
-
-            await SeasonEpisode.updateOne(
-              { _id: firstSeason._id },
-              { $set: { episodes: enriched } }
-            );
-            firstSeason.episodes = enriched as any;
-          }
-        } catch (err: any) {
-          console.warn('[getTitleDetails] Error refreshing season 1 episodes:', err.message);
-        }
-      }
-    }
-
-    // Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
+    // 1. Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
     let finalSoundtracks = soundtracks;
-    if (soundtracks.length === 0 || !soundtracks.some((s) => s.previewUrl)) {
+    const isRiverdale = title.name.toLowerCase().includes('riverdale');
+    const needsRefresh =
+      soundtracks.length === 0 ||
+      !soundtracks.some((s) => s.previewUrl) ||
+      (isRiverdale && !soundtracks.some((s) => s.songName.toLowerCase().includes('kids in america')));
+
+    if (needsRefresh) {
       try {
         const dynamicTracks = await SoundtrackService.getSoundtracksForTitle(title.name);
         if (dynamicTracks.length > 0) {
@@ -479,6 +375,70 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         }
       } catch (stErr: any) {
         console.warn('[getTitleDetails] Error discovering soundtracks:', stErr.message);
+      }
+    }
+
+    // 2. Auto-enrich Season 1 episodes with real TMDB data and matched iconic songs
+    if (title.type === 'tv' && title.tmdbId && seasons.length > 0) {
+      const firstSeason = seasons[0];
+      const hasGenericEpisodes =
+        !firstSeason.episodes ||
+        firstSeason.episodes.length === 0 ||
+        firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
+      const needsSongRefresh =
+        hasGenericEpisodes ||
+        firstSeason.episodes.some(
+          (e: any) =>
+            !e.featuredSong ||
+            e.featuredSong.songName?.includes('Theme & Suite') ||
+            e.featuredSong.songName?.includes('Symphonic Suite') ||
+            (!e.featuredSong.previewUrl && finalSoundtracks.some((s: any) => s.previewUrl))
+        );
+
+      if (needsSongRefresh) {
+        try {
+          let baseEpisodes = firstSeason.episodes;
+          if (hasGenericEpisodes) {
+            const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, firstSeason.seasonNumber);
+            if (tmdbSeason && tmdbSeason.episodes.length > 0) {
+              baseEpisodes = tmdbSeason.episodes;
+            }
+          }
+
+          if (baseEpisodes && baseEpisodes.length > 0) {
+            const totalEps = baseEpisodes.length;
+            const enriched = baseEpisodes.map((ep: any) => {
+              const matched = SoundtrackService.matchSongForEpisode(
+                finalSoundtracks as any,
+                firstSeason.seasonNumber,
+                ep.episodeNumber,
+                totalEps,
+                ep.name
+              );
+              return {
+                ...ep,
+                featuredSong: matched
+                  ? {
+                      songName: matched.songName,
+                      artist: matched.artist,
+                      sceneRef: matched.episodeRef,
+                      previewUrl: matched.previewUrl,
+                      albumArtUrl: matched.albumArtUrl,
+                      spotifyUrl: matched.spotifyUrl,
+                    }
+                  : undefined,
+              };
+            });
+
+            await SeasonEpisode.updateOne(
+              { _id: firstSeason._id },
+              { $set: { episodes: enriched } }
+            );
+            firstSeason.episodes = enriched as any;
+          }
+        } catch (err: any) {
+          console.warn('[getTitleDetails] Error refreshing season 1 episodes & songs:', err.message);
+        }
       }
     }
 
@@ -556,20 +516,50 @@ export const getSeasonEpisodes = async (
       seasonDoc.episodes.length === 0 ||
       seasonDoc.episodes.some((e: any) => e.name && e.name.match(/^Episode \d+$/i));
 
-    if (hasGeneric && title.tmdbId) {
-      const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
-      if (tmdbSeason && tmdbSeason.episodes.length > 0) {
+    const needsSongEnrichment =
+      hasGeneric ||
+      (seasonDoc?.episodes?.some(
+        (e: any) =>
+          !e.featuredSong ||
+          e.featuredSong.songName?.includes('Theme & Suite') ||
+          e.featuredSong.songName?.includes('Symphonic Suite') ||
+          !e.featuredSong.previewUrl
+      ) ?? false);
+
+    if (needsSongEnrichment && title.tmdbId) {
+      let baseEpisodes = seasonDoc?.episodes || [];
+      if (hasGeneric) {
+        const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
+        if (tmdbSeason && tmdbSeason.episodes.length > 0) {
+          baseEpisodes = tmdbSeason.episodes;
+        }
+      }
+
+      if (baseEpisodes.length > 0) {
         const songs = await SoundtrackService.getSoundtracksForTitle(title.name);
-        const enriched = tmdbSeason.episodes.map((ep, idx) => ({
-          ...ep,
-          featuredSong: songs[idx % songs.length]
-            ? {
-                songName: songs[idx % songs.length].songName,
-                artist: songs[idx % songs.length].artist,
-                sceneRef: songs[idx % songs.length].episodeRef,
-              }
-            : undefined,
-        }));
+        const totalEps = baseEpisodes.length;
+        const enriched = baseEpisodes.map((ep: any) => {
+          const matched = SoundtrackService.matchSongForEpisode(
+            songs,
+            seasonNumber,
+            ep.episodeNumber,
+            totalEps,
+            ep.name
+          );
+          return {
+            ...ep,
+            featuredSong: matched
+              ? {
+                  songName: matched.songName,
+                  artist: matched.artist,
+                  sceneRef: matched.episodeRef,
+                  previewUrl: matched.previewUrl,
+                  albumArtUrl: matched.albumArtUrl,
+                  spotifyUrl: matched.spotifyUrl,
+                }
+              : undefined,
+          };
+        });
 
         seasonDoc = await SeasonEpisode.findOneAndUpdate(
           { title: title._id, seasonNumber },
@@ -784,3 +774,75 @@ export const voteCommentPoll = async (req: IAuthRequest, res: Response, next: Ne
     next(error);
   }
 };
+
+/**
+ * Search iTunes Apple Music tracks for soundtrack contributor modal
+ */
+export const searchMusic = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const q = String(req.query.q || '');
+    const tracks = await SoundtrackService.searchItunes(q);
+    sendSuccess(res, { tracks }, 'Music search results retrieved');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Add an iconic track to a title's soundtrack catalog (crowdsourced / user contributed)
+ */
+export const addTitleSoundtrack = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const titleId = String(req.params.titleId);
+    const { songName, artist, episodeRef, previewUrl, albumArtUrl, spotifyUrl } = req.body;
+
+    if (!songName || !artist) {
+      res.status(400).json({ success: false, error: 'Song name and artist are required' });
+      return;
+    }
+
+    let title: any = null;
+    if (mongoose.Types.ObjectId.isValid(titleId)) {
+      title = await Title.findById(titleId).lean();
+    } else {
+      const tmdbIdNum = parseInt(titleId, 10);
+      if (!isNaN(tmdbIdNum)) {
+        title = await Title.findOne({ tmdbId: tmdbIdNum }).lean();
+      }
+    }
+
+    if (!title) {
+      res.status(404).json({ success: false, error: 'Title not found' });
+      return;
+    }
+
+    let finalPreview = previewUrl;
+    let finalArt = albumArtUrl;
+    let finalLink = spotifyUrl;
+
+    if (!finalPreview || !finalArt) {
+      const enriched = await SoundtrackService.enrichTrackWithAudio(songName, artist);
+      finalPreview = finalPreview || enriched.previewUrl;
+      finalArt = finalArt || enriched.albumArtUrl;
+      finalLink = finalLink || enriched.appleMusicUrl;
+    }
+
+    const existingCount = await Soundtrack.countDocuments({ title: title._id });
+
+    const created = await Soundtrack.create({
+      title: title._id,
+      songName: songName.trim(),
+      artist: artist.trim(),
+      episodeRef: episodeRef?.trim() || undefined,
+      popularityRank: existingCount + 1,
+      previewUrl: finalPreview,
+      albumArtUrl: finalArt,
+      spotifyUrl: finalLink,
+    });
+
+    sendSuccess(res, { soundtrack: created }, 'Song added to soundtrack successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
