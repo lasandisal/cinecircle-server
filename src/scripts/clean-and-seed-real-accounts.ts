@@ -244,22 +244,38 @@ async function cleanAndSeedRealAccounts() {
   }
   console.log('[CleanSeeder] Verified real watch sessions.');
 
-  // 6. User Watchlist entries for Lasandi
-  const lasandiWatchlist = [
+  // 6. User Watchlist entries for all 4 real accounts
+  const communityWatchlists = [
+    // Lasandi Salwathura
     { user: lasandi._id, title: dune._id, watched: true, starRating: 5, addedAt: new Date(Date.now() - 86400000 * 4), watchedAt: new Date(Date.now() - 86400000 * 2) },
     { user: lasandi._id, title: spiderVerse._id, watched: true, starRating: 5, addedAt: new Date(Date.now() - 86400000 * 3), watchedAt: new Date(Date.now() - 86400000) },
     { user: lasandi._id, title: oppenheimer._id, watched: false, addedAt: new Date(Date.now() - 86400000 * 2) },
     { user: lasandi._id, title: strangerThings._id, watched: false, addedAt: new Date() },
+
+    // MishtiX Creations
+    { user: mishtix._id, title: spiderVerse._id, watched: true, starRating: 5, addedAt: new Date(Date.now() - 86400000 * 5), watchedAt: new Date(Date.now() - 86400000 * 3) },
+    { user: mishtix._id, title: dune._id, watched: false, addedAt: new Date(Date.now() - 86400000 * 2) },
+    { user: mishtix._id, title: oppenheimer._id, watched: false, addedAt: new Date() },
+
+    // EventSphere
+    { user: eventSphere._id, title: oppenheimer._id, watched: true, starRating: 5, addedAt: new Date(Date.now() - 86400000 * 6), watchedAt: new Date(Date.now() - 86400000 * 4) },
+    { user: eventSphere._id, title: dune._id, watched: true, starRating: 4, addedAt: new Date(Date.now() - 86400000 * 5), watchedAt: new Date(Date.now() - 86400000 * 2) },
+    { user: eventSphere._id, title: spiderVerse._id, watched: false, addedAt: new Date() },
+
+    // PulseFit
+    { user: pulseFit._id, title: strangerThings._id, watched: true, starRating: 4, addedAt: new Date(Date.now() - 86400000 * 7), watchedAt: new Date(Date.now() - 86400000 * 4) },
+    { user: pulseFit._id, title: dune._id, watched: true, starRating: 5, addedAt: new Date(Date.now() - 86400000 * 3), watchedAt: new Date(Date.now() - 86400000 * 1) },
+    { user: pulseFit._id, title: oppenheimer._id, watched: false, addedAt: new Date() },
   ];
 
-  for (const w of lasandiWatchlist) {
+  for (const w of communityWatchlists) {
     await Watchlist.findOneAndUpdate(
       { user: w.user, title: w.title },
       w,
       { upsert: true, new: true }
     );
   }
-  console.log('[CleanSeeder] Verified personal watchlist for Lasandi.');
+  console.log('[CleanSeeder] Verified personal watchlists for all real accounts.');
 
   console.log('🎉 [CleanSeeder] Cleaned fake accounts and verified all real accounts successfully!');
   process.exit(0);

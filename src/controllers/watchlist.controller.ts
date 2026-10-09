@@ -137,10 +137,12 @@ export const markAsWatched = async (req: IAuthRequest, res: Response, next: Next
         $or: [{ _id: id }, { title: id }],
       },
       {
+        user: userId,
+        title: id,
         watched: Boolean(watched),
         watchedAt: watched ? new Date() : null,
       },
-      { new: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     ).populate('title');
 
     if (!item) {
@@ -187,6 +189,8 @@ export const rateTitle = async (req: IAuthRequest, res: Response, next: NextFunc
         $or: [{ _id: id }, { title: id }],
       },
       {
+        user: userId,
+        title: id,
         starRating: numRating,
         watched: true,
         watchedAt: new Date(),
@@ -204,6 +208,38 @@ export const rateTitle = async (req: IAuthRequest, res: Response, next: NextFunc
     });
 
     sendSuccess(res, { item }, 'Rating recorded successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check if title is in user's watchlist
+ * GET /api/watchlist/status/:titleId
+ */
+export const getTitleWatchlistStatus = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const { titleId } = req.params;
+    const item = await Watchlist.findOne({
+      user: userId,
+      $or: [{ title: titleId }, { _id: titleId }],
+    }).lean();
+
+    sendSuccess(
+      res,
+      {
+        inWatchlist: Boolean(item),
+        watched: Boolean(item?.watched),
+        starRating: item?.starRating || 0,
+        item: item || null,
+      },
+      'Title watchlist status retrieved'
+    );
   } catch (error) {
     next(error);
   }

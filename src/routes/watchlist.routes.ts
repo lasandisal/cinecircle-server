@@ -5,12 +5,14 @@ import {
   removeFromWatchlist,
   markAsWatched,
   rateTitle,
+  getTitleWatchlistStatus,
 } from '../controllers/watchlist.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
 router.get('/', authenticate, getWatchlist);
+router.get('/status/:titleId', authenticate, getTitleWatchlistStatus);
 router.post('/', authenticate, addToWatchlist);
 router.delete('/:id', authenticate, removeFromWatchlist);
 router.patch('/:id/watched', authenticate, markAsWatched);
