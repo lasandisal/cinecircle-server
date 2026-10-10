@@ -283,7 +283,7 @@ function isSoundtrackVerified(title: any, soundtracks: any[]): boolean {
     }
     if (
       (titleNameLower.includes('laftan') || titleNameLower.includes('anlamaz')) &&
-      (!soundtracks[0] || !soundtracks[0].artist?.toLowerCase().includes('cem tuncer') || !soundtracks[0].songName?.toLowerCase().includes('laftan'))
+      (!soundtracks[0] || (!soundtracks[0].artist?.toLowerCase().includes('kıvılcım') && !soundtracks[0].artist?.toLowerCase().includes('kivilcim')))
     ) {
       return false;
     }
