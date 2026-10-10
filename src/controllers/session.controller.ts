@@ -18,6 +18,42 @@ function generateJoinCode(): string {
 }
 
 /**
+ * Helper to fetch, sanitize, and populate a session with deduplicated participants
+ */
+async function getPopulatedSession(sessionId: any) {
+  const sessionDoc = await Session.findById(sessionId);
+  if (!sessionDoc) return null;
+
+  // Clean duplicate ObjectIds in DB if any exist
+  const uniqueParticipantIds = Array.from(
+    new Set(sessionDoc.participants.map((p: any) => p.toString()))
+  );
+  if (uniqueParticipantIds.length !== sessionDoc.participants.length) {
+    sessionDoc.participants = uniqueParticipantIds as any;
+    await sessionDoc.save();
+  }
+
+  const populated = await Session.findById(sessionId)
+    .populate('host', 'name email avatar')
+    .populate('participants', 'name email avatar')
+    .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+    .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+    .lean();
+
+  if (populated?.participants) {
+    const seen = new Set<string>();
+    populated.participants = populated.participants.filter((p: any) => {
+      const pid = (p?._id || p)?.toString();
+      if (!pid || seen.has(pid)) return false;
+      seen.add(pid);
+      return true;
+    });
+  }
+
+  return populated;
+}
+
+/**
  * Create a new group decision room with real shortlist candidates
  * POST /api/sessions/create
  */
@@ -60,11 +96,7 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
       createdAt: new Date(),
     });
 
-    const populatedSession = await Session.findById(session._id)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
+    const populatedSession = await getPopulatedSession(session._id);
 
     sendSuccess(res, { session: populatedSession, joinCode }, 'Group session created successfully', 201);
   } catch (error) {
@@ -86,7 +118,21 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
       .limit(10)
       .lean();
 
-    sendSuccess(res, { sessions }, 'Active sessions retrieved');
+    // Deduplicate participants in active sessions
+    const sanitized = sessions.map((s) => {
+      if (s.participants) {
+        const seen = new Set<string>();
+        s.participants = s.participants.filter((p: any) => {
+          const pid = (p?._id || p)?.toString();
+          if (!pid || seen.has(pid)) return false;
+          seen.add(pid);
+          return true;
+        });
+      }
+      return s;
+    });
+
+    sendSuccess(res, { sessions: sanitized }, 'Active sessions retrieved');
   } catch (error) {
     next(error);
   }
@@ -101,30 +147,26 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
     const { joinCode } = req.params;
     const cleanCode = String(joinCode || '').toUpperCase().trim();
 
-    const session = await Session.findOne({ joinCode: cleanCode })
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
-
-    if (!session) {
+    const sessionDoc = await Session.findOne({ joinCode: cleanCode });
+    if (!sessionDoc) {
       return next(new AppError('Session room not found with code ' + cleanCode, 404));
     }
 
+    const populatedSession = await getPopulatedSession(sessionDoc._id);
+
     // Also get all votes for this session
-    const votes = await Vote.find({ session: session._id })
+    const votes = await Vote.find({ session: sessionDoc._id })
       .populate('user', 'name')
       .lean();
 
-    sendSuccess(res, { session, votes }, 'Session retrieved successfully');
+    sendSuccess(res, { session: populatedSession, votes }, 'Session retrieved successfully');
   } catch (error) {
     next(error);
   }
 };
 
 /**
- * Join an existing watch decision session
+ * Join an existing watch decision session (Atomic $addToSet prevents duplicates)
  * POST /api/sessions/join
  */
 export const joinSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -140,25 +182,19 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
     }
 
     const cleanCode = joinCode.toUpperCase().trim();
-    const session = await Session.findOne({ joinCode: cleanCode });
+
+    // Atomic $addToSet guarantees an ID can NEVER be added more than once
+    const session = await Session.findOneAndUpdate(
+      { joinCode: cleanCode },
+      { $addToSet: { participants: userId } },
+      { new: true }
+    );
 
     if (!session) {
       return next(new AppError(`No active session found with code ${cleanCode}`, 404));
     }
 
-    // Add user to participants array if not already present
-    const isParticipant = session.participants.some((p: any) => p.toString() === userId.toString());
-    if (!isParticipant) {
-      session.participants.push(userId as any);
-      await session.save();
-    }
-
-    const populatedSession = await Session.findById(session._id)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
+    const populatedSession = await getPopulatedSession(session._id);
 
     const votes = await Vote.find({ session: session._id })
       .populate('user', 'name')
@@ -242,7 +278,10 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
       }
     } else if (finalTitleId) {
       // If finalTitleId is not a MongoDB ObjectId (e.g. numeric ID or tmdbId string)
-      if (typeof finalTitleId === 'number' || (!finalTitleId.toString().match(/^[0-9a-fA-F]{24}$/) && !isNaN(Number(finalTitleId)))) {
+      if (
+        typeof finalTitleId === 'number' ||
+        (!finalTitleId.toString().match(/^[0-9a-fA-F]{24}$/) && !isNaN(Number(finalTitleId)))
+      ) {
         let titleDoc = await Title.findOne({ tmdbId: Number(finalTitleId) });
         if (!titleDoc && titleData) {
           titleDoc = await Title.create({
@@ -268,21 +307,14 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
       return next(new AppError('Valid titleId or tmdbId is required', 400));
     }
 
-    // Check if already in shortlist
-    const alreadyInShortlist = session.shortlist.some((id: any) => id.toString() === finalTitleId.toString());
-    if (!alreadyInShortlist) {
-      session.shortlist.push(finalTitleId as any);
-      await session.save();
-    }
+    // Atomic $addToSet for shortlist items as well
+    await Session.findByIdAndUpdate(sessionId, {
+      $addToSet: { shortlist: finalTitleId },
+    });
 
-    const populatedSession = await Session.findById(sessionId)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
+    const populatedSession = await getPopulatedSession(sessionId);
 
-    const votes = await Vote.find({ session: session._id })
+    const votes = await Vote.find({ session: sessionId })
       .populate('user', 'name')
       .lean();
 
@@ -313,15 +345,11 @@ export const removeTitleFromShortlist = async (req: IAuthRequest, res: Response,
       return next(new AppError('Cannot modify a closed session', 400));
     }
 
-    session.shortlist = session.shortlist.filter((id: any) => id.toString() !== titleId.toString());
-    await session.save();
+    await Session.findByIdAndUpdate(sessionId, {
+      $pull: { shortlist: titleId },
+    });
 
-    const populatedSession = await Session.findById(sessionId)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
+    const populatedSession = await getPopulatedSession(sessionId);
 
     sendSuccess(res, { session: populatedSession }, 'Title removed from shortlist');
   } catch (error) {
@@ -421,12 +449,7 @@ export const lockSessionPick = async (req: IAuthRequest, res: Response, next: Ne
     session.status = 'closed';
     await session.save();
 
-    const finalizedSession = await Session.findById(sessionId)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .lean();
+    const finalizedSession = await getPopulatedSession(sessionId);
 
     sendSuccess(res, { session: finalizedSession, winnerId }, 'Session decision finalized successfully');
   } catch (error) {
