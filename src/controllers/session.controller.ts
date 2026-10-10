@@ -156,7 +156,7 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
 
     // Also get all votes for this session
     const votes = await Vote.find({ session: sessionDoc._id })
-      .populate('user', 'name')
+      .populate('user', 'name email avatar')
       .lean();
 
     sendSuccess(res, { session: populatedSession, votes }, 'Session retrieved successfully');
@@ -197,7 +197,7 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
     const populatedSession = await getPopulatedSession(session._id);
 
     const votes = await Vote.find({ session: session._id })
-      .populate('user', 'name')
+      .populate('user', 'name email avatar')
       .lean();
 
     sendSuccess(res, { session: populatedSession, votes }, 'Joined session successfully');
@@ -315,7 +315,7 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
     const populatedSession = await getPopulatedSession(sessionId);
 
     const votes = await Vote.find({ session: sessionId })
-      .populate('user', 'name')
+      .populate('user', 'name email avatar')
       .lean();
 
     sendSuccess(res, { session: populatedSession, votes }, 'Title added to session shortlist successfully');
