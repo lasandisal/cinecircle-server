@@ -5,6 +5,7 @@ import {
   SeasonEpisode,
   Soundtrack,
   Comment,
+  Watchlist,
 } from '../models';
 import { tmdbService } from '../services/TmdbService';
 import { SeedService } from '../services/SeedService';
@@ -395,7 +396,7 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
 
     // Fetch related models concurrently
     const titleObjId = title._id;
-    let [watchProviders, seasons, soundtracks, allComments] = titleObjId
+    let [watchProviders, seasons, soundtracks, allComments, watcherDocs] = titleObjId
       ? await Promise.all([
           WatchProvider.find({ title: titleObjId }).lean(),
           SeasonEpisode.find({ title: titleObjId }).sort({ seasonNumber: 1 }).lean(),
@@ -404,8 +405,13 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
             .populate('user', 'name email role')
             .sort({ createdAt: 1 })
             .lean(),
+          Watchlist.find({ title: titleObjId, watched: true })
+            .populate('user', 'name handle avatar email')
+            .sort({ watchedAt: -1, addedAt: -1 })
+            .limit(10)
+            .lean(),
         ])
-      : [[], [], [], []];
+      : [[], [], [], [], []];
 
     // Auto-refresh watch providers to ensure major global providers (Netflix, Prime Video, etc.) are present
     const hasBothNetflixAndPrime =
@@ -590,12 +596,24 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       }))
       .reverse();
 
+    const communityWatchers = (watcherDocs || [])
+      .filter((w: any) => w.user != null)
+      .map((w: any) => ({
+        userId: w.user._id,
+        name: w.user.name,
+        handle: w.user.handle,
+        avatar: w.user.avatar,
+        starRating: w.starRating,
+        watchedAt: w.watchedAt || w.addedAt,
+      }));
+
     const fullDetail = {
       ...title,
       watchProviders,
       seasons,
       soundtracks: finalSoundtracks,
       comments: commentsWithReplies,
+      communityWatchers,
     };
 
     sendSuccess(res, { title: fullDetail }, 'Title details retrieved');
