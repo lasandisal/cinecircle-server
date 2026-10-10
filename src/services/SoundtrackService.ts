@@ -203,7 +203,39 @@ const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; epi
     { songName: 'Growing Pains 2', artist: 'Cold Cherry', episodeRef: 'Season 1 Emotional Breakups & Tension', popularityRank: 6 },
     { songName: 'Crying Again', artist: 'Moon Myung Jin', episodeRef: 'Season 1 Rain Scene / Heartbreak Theme', popularityRank: 7 },
   ],
+  ask_laftan_anlamaz: [
+    { songName: 'Aşk Laftan Anlamaz', artist: 'Cem Tuncer', episodeRef: 'Iconic Main Title Jenerik Theme Song', popularityRank: 1 },
+    { songName: 'Murat Hayat Romantik Tema', artist: 'Cem Tuncer', episodeRef: 'Season 1 - Murat & Hayat Pivotal Romantic Scenes', popularityRank: 2 },
+    { songName: "Aşk'a Ağıt", artist: 'Cem Tuncer', episodeRef: 'Season 1 Emotional Heartbreak & Rain Scenes', popularityRank: 3 },
+    { songName: 'İlk Aşk', artist: 'Cem Tuncer', episodeRef: 'Hayat First Day at Sarte / Encounter', popularityRank: 4 },
+    { songName: 'Aşk Teması', artist: 'Cem Tuncer', episodeRef: 'Murat & Hayat Gazebo & Garden Duet Theme', popularityRank: 5 },
+    { songName: 'Murat Hayat Hüzün Teması', artist: 'Cem Tuncer', episodeRef: 'Murat Melancholy & Conflict Moments', popularityRank: 6 },
+    { songName: 'Sarte', artist: 'Cem Tuncer', episodeRef: 'Sarte Fashion House High Energy Theme', popularityRank: 7 },
+    { songName: 'Mutlu Bir Gün', artist: 'Cem Tuncer', episodeRef: 'Hayat, Aslı & İpek Friendship Montage', popularityRank: 8 },
+    { songName: 'Aşkın Günlüğü', artist: 'Cem Tuncer', episodeRef: 'Hayat Secret Journal & Confession Scene', popularityRank: 9 },
+    { songName: 'Tuval', artist: 'Cem Tuncer', episodeRef: 'Tuval Iconic Quirky Fashion Studio Moments', popularityRank: 10 },
+  ],
 };
+
+/**
+ * Universal text normalization that strips diacritics and special characters for international titles
+ */
+function cleanNormalize(text: string): string {
+  if (!text) return '';
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export class SoundtrackService {
   private static cache = new Map<string, { previewUrl?: string; albumArtUrl?: string; appleMusicUrl?: string }>();
@@ -281,12 +313,11 @@ export class SoundtrackService {
     releaseYear?: number
   ): Promise<SoundtrackTrack[]> {
     const cleanTitle = titleName.trim();
-    const titleLower = cleanTitle.toLowerCase();
-    const origLower = (originalName || '').toLowerCase().trim();
+    const normTitle = cleanNormalize(cleanTitle);
+    const normOrig = originalName ? cleanNormalize(originalName) : '';
 
     // Primary significant words for verification (ignore stop words)
-    const titleWords = titleLower
-      .replace(/[^a-z0-9 ]/g, ' ')
+    const titleWords = normTitle
       .split(/\s+/)
       .filter((w) => w.length > 2 && !['the', 'and', 'for', 'from', 'with', 'part'].includes(w));
 
@@ -308,10 +339,10 @@ export class SoundtrackService {
       wikiCandidates = items
         .map((i: any) => i.title as string)
         .filter((wTitle: string) => {
-          const wLower = wTitle.toLowerCase();
+          const wNorm = cleanNormalize(wTitle);
           return (
-            wLower.includes(titleLower) ||
-            (titleWords.length > 0 && titleWords.some((w) => wLower.includes(w)))
+            wNorm.includes(normTitle) ||
+            (titleWords.length > 0 && titleWords.some((w) => wNorm.includes(w)))
           );
         });
     } catch {
@@ -329,9 +360,14 @@ export class SoundtrackService {
         `${cleanTitle}: Season`,
         `${cleanTitle} Season 1`,
         `Music from ${cleanTitle}`,
+        `${cleanTitle} (Orijinal Dizi Müzikleri)`,
+        `${cleanTitle} Dizi Müzikleri`,
+        `${cleanTitle} Jenerik`,
+        `${cleanTitle} Cem Tuncer`,
         ...wikiCandidates.slice(0, 3),
         originalName && originalName !== cleanTitle ? `${originalName} OST` : null,
         originalName && originalName !== cleanTitle ? `${originalName} Soundtrack` : null,
+        originalName && originalName !== cleanTitle ? `${originalName} Dizi Müzikleri` : null,
         `${cleanTitle} (Original Television Soundtrack)`,
         `${cleanTitle} Original Series Soundtrack`,
         `${cleanTitle} (Music from the TV Series)`,
@@ -367,41 +403,55 @@ export class SoundtrackService {
 
         const albums = res.data?.results || [];
         for (const a of albums) {
-          const name = (a.collectionName || '').toLowerCase();
-          const artist = (a.artistName || '').toLowerCase();
+          const nameNorm = cleanNormalize(a.collectionName || '');
+          const artistNorm = cleanNormalize(a.artistName || '');
           const count = a.trackCount || 0;
 
           // Disqualify cross-medium false positives:
-          if (mediaType === 'tv' && (name.includes('motion picture') || name.includes('movie soundtrack'))) {
+          if (mediaType === 'tv' && (nameNorm.includes('motion picture') || nameNorm.includes('movie soundtrack'))) {
             continue;
           }
-          if (mediaType === 'film' && (name.includes('television') || name.includes('series soundtrack') || name.includes('season '))) {
+          if (mediaType === 'film' && (nameNorm.includes('television') || nameNorm.includes('series soundtrack') || nameNorm.includes('season '))) {
             continue;
           }
 
-          if (artist === titleLower && !artist.includes('cast') && !name.includes('soundtrack') && !name.includes('score') && !name.includes('ost')) {
+          if (artistNorm === normTitle && !artistNorm.includes('cast') && !nameNorm.includes('soundtrack') && !nameNorm.includes('score') && !nameNorm.includes('ost')) {
             continue;
           }
 
           const isSoundtrack =
-            name.includes('soundtrack') ||
-            name.includes('ost') ||
-            name.includes('score') ||
-            name.includes('music from') ||
-            name.includes('television soundtrack') ||
-            name.includes('series soundtrack') ||
-            name.includes('motion picture') ||
-            name.includes('omfgg') ||
-            name.includes('karaoke') ||
-            artist.includes('soundtrack') ||
-            artist.includes('cast') ||
-            artist.includes('various artists');
+            nameNorm.includes('soundtrack') ||
+            nameNorm.includes('ost') ||
+            nameNorm.includes('score') ||
+            nameNorm.includes('music from') ||
+            nameNorm.includes('television soundtrack') ||
+            nameNorm.includes('series soundtrack') ||
+            nameNorm.includes('motion picture') ||
+            nameNorm.includes('omfgg') ||
+            nameNorm.includes('karaoke') ||
+            nameNorm.includes('dizi') ||
+            nameNorm.includes('muzik') ||
+            nameNorm.includes('jenerik') ||
+            nameNorm.includes('tema') ||
+            nameNorm.includes('banda sonora') ||
+            nameNorm.includes('trilha sonora') ||
+            nameNorm.includes('bande originale') ||
+            nameNorm.includes('colonna sonora') ||
+            nameNorm.includes('filmmusik') ||
+            nameNorm.includes('original series') ||
+            nameNorm.includes('television') ||
+            nameNorm.includes('theme') ||
+            nameNorm.includes('themes') ||
+            artistNorm.includes('soundtrack') ||
+            artistNorm.includes('cast') ||
+            artistNorm.includes('various artists') ||
+            artistNorm.includes('cem tuncer');
 
           const mentionsTitle =
-            name.includes(titleLower) ||
-            artist.includes(titleLower) ||
-            (origLower && (name.includes(origLower) || artist.includes(origLower))) ||
-            (titleWords.length > 0 && titleWords.every((w) => name.includes(w) || artist.includes(w)));
+            nameNorm.includes(normTitle) ||
+            artistNorm.includes(normTitle) ||
+            (normOrig && (nameNorm.includes(normOrig) || artistNorm.includes(normOrig))) ||
+            (titleWords.length > 0 && titleWords.every((w) => nameNorm.includes(w) || artistNorm.includes(w)));
 
           if (isSoundtrack && mentionsTitle && count > 2) {
             if (!albumMap.has(a.collectionId)) {
@@ -537,12 +587,17 @@ export class SoundtrackService {
     mediaType?: 'film' | 'tv',
     releaseYear?: number
   ): Promise<SoundtrackTrack[]> {
-    const norm = titleName.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    const norm = cleanNormalize(titleName);
+    const origNorm = originalName ? cleanNormalize(originalName) : '';
 
     // 1. Check curated iconic soundtracks first (for titles with bespoke scene descriptions)
     for (const [key, songs] of Object.entries(ICONIC_SOUNDTRACKS)) {
-      const formattedKey = key.replace(/_/g, ' ');
-      if (norm.includes(formattedKey) || formattedKey.includes(norm)) {
+      const formattedKey = cleanNormalize(key.replace(/_/g, ' '));
+      if (
+        norm.includes(formattedKey) ||
+        formattedKey.includes(norm) ||
+        (origNorm && (origNorm.includes(formattedKey) || formattedKey.includes(origNorm)))
+      ) {
         const enriched = await Promise.all(
           songs.map(async (s) => {
             const audioData = await this.enrichTrackWithAudio(s.songName, s.artist);
