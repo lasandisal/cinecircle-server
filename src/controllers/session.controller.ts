@@ -3,6 +3,7 @@ import { IAuthRequest } from '../types';
 import { Session, Title, User, Vote } from '../models';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
+import { tmdbService } from '../services/TmdbService';
 
 /**
  * Generate a unique 6-character room code (e.g., SCI890)
@@ -62,7 +63,7 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
     const populatedSession = await Session.findById(session._id)
       .populate('host', 'name email avatar')
       .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
       .lean();
 
     sendSuccess(res, { session: populatedSession, joinCode }, 'Group session created successfully', 201);
@@ -80,7 +81,7 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
     const sessions = await Session.find({ status: 'open' })
       .populate('host', 'name email avatar')
       .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
       .sort({ createdAt: -1 })
       .limit(10)
       .lean();
@@ -103,8 +104,8 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
     const session = await Session.findOne({ joinCode: cleanCode })
       .populate('host', 'name email avatar')
       .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
-      .populate('finalPick', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
       .lean();
 
     if (!session) {
@@ -155,11 +156,174 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
     const populatedSession = await Session.findById(session._id)
       .populate('host', 'name email avatar')
       .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
-      .populate('finalPick', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
       .lean();
 
-    sendSuccess(res, { session: populatedSession }, 'Joined session successfully');
+    const votes = await Vote.find({ session: session._id })
+      .populate('user', 'name')
+      .lean();
+
+    sendSuccess(res, { session: populatedSession, votes }, 'Joined session successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Add a title (movie/show) to the candidate shortlist of an active session
+ * POST /api/sessions/:sessionId/shortlist
+ */
+export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const { sessionId } = req.params;
+    const { titleId, tmdbId, type, titleData } = req.body;
+
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return next(new AppError('Session room not found', 404));
+    }
+
+    if (session.status !== 'open') {
+      return next(new AppError('Cannot add titles to a closed/finalized session', 400));
+    }
+
+    let finalTitleId = titleId;
+
+    // 1. If tmdbId is provided, find or create title in MongoDB
+    if (!finalTitleId && tmdbId) {
+      let titleDoc = await Title.findOne({ tmdbId: Number(tmdbId) });
+      if (!titleDoc) {
+        if (titleData) {
+          titleDoc = await Title.create({
+            name: titleData.name || titleData.title,
+            originalName: titleData.originalName,
+            type: titleData.type || (type === 'tv' ? 'tv' : 'film'),
+            tmdbId: Number(tmdbId),
+            releaseYear: titleData.releaseYear,
+            runtimeMinutes: titleData.runtimeMinutes,
+            genres: titleData.genres || [],
+            overview: titleData.overview || titleData.synopsis,
+            synopsis: titleData.synopsis || titleData.overview,
+            posterUrl: titleData.posterUrl,
+            backdropUrl: titleData.backdropUrl,
+            voteAverage: titleData.voteAverage || 7.5,
+            voteCount: titleData.voteCount || 100,
+          });
+        } else if (tmdbService.hasApiKey()) {
+          const mediaType: 'tv' | 'film' = type === 'tv' ? 'tv' : 'film';
+          const details = await tmdbService.fetchDetails(Number(tmdbId), mediaType);
+          if (details) {
+            titleDoc = await Title.create({
+              name: details.name,
+              originalName: details.originalName,
+              type: details.type,
+              tmdbId: details.tmdbId,
+              releaseYear: details.releaseYear,
+              runtimeMinutes: details.runtimeMinutes,
+              genres: details.genres,
+              overview: details.synopsis,
+              synopsis: details.synopsis,
+              posterUrl: details.posterUrl,
+              backdropUrl: details.backdropUrl,
+              voteAverage: details.voteAverage,
+              moodTags: details.moodTags || [],
+            });
+          }
+        }
+      }
+      if (titleDoc) {
+        finalTitleId = titleDoc._id;
+      }
+    } else if (finalTitleId) {
+      // If finalTitleId is not a MongoDB ObjectId (e.g. numeric ID or tmdbId string)
+      if (typeof finalTitleId === 'number' || (!finalTitleId.toString().match(/^[0-9a-fA-F]{24}$/) && !isNaN(Number(finalTitleId)))) {
+        let titleDoc = await Title.findOne({ tmdbId: Number(finalTitleId) });
+        if (!titleDoc && titleData) {
+          titleDoc = await Title.create({
+            name: titleData.name || titleData.title,
+            type: titleData.type || 'film',
+            tmdbId: Number(finalTitleId),
+            releaseYear: titleData.releaseYear,
+            runtimeMinutes: titleData.runtimeMinutes,
+            genres: titleData.genres || [],
+            overview: titleData.overview,
+            posterUrl: titleData.posterUrl,
+            backdropUrl: titleData.backdropUrl,
+            voteAverage: titleData.voteAverage || 7.5,
+          });
+        }
+        if (titleDoc) {
+          finalTitleId = titleDoc._id;
+        }
+      }
+    }
+
+    if (!finalTitleId) {
+      return next(new AppError('Valid titleId or tmdbId is required', 400));
+    }
+
+    // Check if already in shortlist
+    const alreadyInShortlist = session.shortlist.some((id: any) => id.toString() === finalTitleId.toString());
+    if (!alreadyInShortlist) {
+      session.shortlist.push(finalTitleId as any);
+      await session.save();
+    }
+
+    const populatedSession = await Session.findById(sessionId)
+      .populate('host', 'name email avatar')
+      .populate('participants', 'name email avatar')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .lean();
+
+    const votes = await Vote.find({ session: session._id })
+      .populate('user', 'name')
+      .lean();
+
+    sendSuccess(res, { session: populatedSession, votes }, 'Title added to session shortlist successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Remove a title from the candidate shortlist
+ * DELETE /api/sessions/:sessionId/shortlist/:titleId
+ */
+export const removeTitleFromShortlist = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const { sessionId, titleId } = req.params;
+    const session = await Session.findById(sessionId);
+    if (!session) {
+      return next(new AppError('Session room not found', 404));
+    }
+
+    if (session.status !== 'open') {
+      return next(new AppError('Cannot modify a closed session', 400));
+    }
+
+    session.shortlist = session.shortlist.filter((id: any) => id.toString() !== titleId.toString());
+    await session.save();
+
+    const populatedSession = await Session.findById(sessionId)
+      .populate('host', 'name email avatar')
+      .populate('participants', 'name email avatar')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .lean();
+
+    sendSuccess(res, { session: populatedSession }, 'Title removed from shortlist');
   } catch (error) {
     next(error);
   }
@@ -260,8 +424,8 @@ export const lockSessionPick = async (req: IAuthRequest, res: Response, next: Ne
     const finalizedSession = await Session.findById(sessionId)
       .populate('host', 'name email avatar')
       .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
-      .populate('finalPick', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage overview')
+      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
+      .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
       .lean();
 
     sendSuccess(res, { session: finalizedSession, winnerId }, 'Session decision finalized successfully');
