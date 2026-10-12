@@ -15,6 +15,7 @@ export interface IUser {
   tasteProfile?: Types.ObjectId;
   subscribedServices: string[];
   fatigueCount: number;
+  onboarded?: boolean;
   createdAt: Date;
 }
 

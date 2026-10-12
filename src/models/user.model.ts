@@ -15,6 +15,7 @@ const UserSchema = new Schema<IUserDocument>(
     tasteProfile: { type: Schema.Types.ObjectId, ref: 'TasteProfile' },
     subscribedServices: { type: [String], default: [] },
     fatigueCount: { type: Number, default: 0 },
+    onboarded: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

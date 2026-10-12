@@ -199,6 +199,57 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
 };
 
 /**
+ * Complete First-Time Onboarding Wizard (Genres, Seed Titles, Exclusions, Subscriptions)
+ * POST /api/users/onboarding
+ */
+export const completeOnboarding = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const { favoriteGenres = [], exclusions = [], favoriteTitles = [], subscribedServices = [] } = req.body;
+
+    const profile = await TasteProfile.findOneAndUpdate(
+      { user: userId },
+      {
+        user: userId,
+        favoriteGenres,
+        exclusions,
+        favoriteTitles,
+        updatedAt: new Date(),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        tasteProfile: profile._id,
+        subscribedServices,
+        onboarded: true,
+      },
+      { new: true }
+    )
+      .select('-passwordHash')
+      .populate('tasteProfile')
+      .lean();
+
+    sendSuccess(
+      res,
+      {
+        user: updatedUser,
+        tasteProfile: profile,
+      },
+      'Onboarding completed successfully'
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Update taste profile (genres, favorites, exclusions)
  * PUT /api/users/taste-profile
  */
@@ -222,6 +273,10 @@ export const updateTasteProfile = async (req: IAuthRequest, res: Response, next:
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    if (favoriteGenres.length > 0) {
+      await User.findByIdAndUpdate(userId, { onboarded: true });
+    }
 
     sendSuccess(res, { tasteProfile: profile }, 'Taste profile updated');
   } catch (error) {

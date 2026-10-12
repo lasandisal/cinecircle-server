@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { Title, TasteProfile } from '../models';
+import { Title, TasteProfile, User, WatchProvider } from '../models';
 import { sendSuccess } from '../utils/response';
 import { AiService } from '../services/ai.service';
 import type { IAuthRequest } from '../types';
@@ -24,6 +24,8 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
     let targetGenres: string[] = MOOD_GENRES[mood as string] || ['Drama', 'Thriller'];
     let maxRuntime = Number(duration) || 90;
     let rationalePrefix = `Selected for your "${mood}" mood`;
+    let userExclusions: string[] = [];
+    let userSubscribedServices: string[] = [];
 
     // If natural language vibe prompt is provided, use Gemini AI to interpret
     if (aiPrompt && typeof aiPrompt === 'string' && aiPrompt.trim()) {
@@ -43,12 +45,22 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
       }
     }
 
-    // Include user's favorite genres if logged in
+    // Include user's taste profile and subscribed services if logged in
     const userId = req.user?.id;
     if (userId) {
-      const profile = await TasteProfile.findOne({ user: userId });
+      const [profile, userDoc] = await Promise.all([
+        TasteProfile.findOne({ user: userId }).lean(),
+        User.findById(userId).select('subscribedServices').lean(),
+      ]);
+
       if (profile?.favoriteGenres?.length) {
         targetGenres = Array.from(new Set([...targetGenres, ...profile.favoriteGenres]));
+      }
+      if (profile?.exclusions?.length) {
+        userExclusions = profile.exclusions;
+      }
+      if (userDoc?.subscribedServices?.length) {
+        userSubscribedServices = userDoc.subscribedServices;
       }
     }
 
@@ -67,17 +79,50 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
       ];
     }
 
-    const candidateTitles = await Title.find(query).limit(50).lean();
+    const candidateTitles = await Title.find(query).limit(60).lean();
+    const candidateIds = candidateTitles.map((t) => t._id);
+
+    // Fetch watch providers for candidates
+    const providers = await WatchProvider.find({ title: { $in: candidateIds } }).lean();
+    const providerMap = new Map<string, string[]>();
+    for (const p of providers) {
+      const key = p.title.toString();
+      if (!providerMap.has(key)) providerMap.set(key, []);
+      if (!providerMap.get(key)!.includes(p.service)) {
+        providerMap.get(key)!.push(p.service);
+      }
+    }
 
     // Compute tailored match score for each title
-    const scored = candidateTitles.map((t) => {
+    const scored: any[] = [];
+
+    for (const t of candidateTitles) {
+      const titleGenres = Array.isArray(t.genres) ? t.genres : [];
+
+      // Filter out user's hard exclusions (e.g. 'Horror')
+      if (userExclusions.length > 0) {
+        const isExcluded = userExclusions.some((exc) =>
+          titleGenres.some(
+            (tg) =>
+              tg.toLowerCase().includes(exc.toLowerCase()) ||
+              exc.toLowerCase().includes(tg.toLowerCase())
+          )
+        );
+        if (isExcluded) continue;
+      }
+
       let score = 50; // base score
 
       // Genre alignment
-      const titleGenres = Array.isArray(t.genres) ? t.genres : [];
       let genreMatches = 0;
       targetGenres.forEach((g) => {
-        if (titleGenres.some((tg) => tg.toLowerCase().includes(g.toLowerCase()) || g.toLowerCase().includes(tg.toLowerCase()))) {
+        if (
+          titleGenres.some(
+            (tg) =>
+              tg.toLowerCase().includes(g.toLowerCase()) ||
+              g.toLowerCase().includes(tg.toLowerCase())
+          )
+        ) {
           score += 15;
           genreMatches++;
         }
@@ -94,9 +139,25 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
         score += 20;
       }
 
+      // Owned streaming services bonus (+15 points per proposal formula)
+      const availableServices = providerMap.get(t._id.toString()) || ['Netflix', 'Prime Video'];
+      let ownedMatch = false;
+      if (userSubscribedServices.length > 0) {
+        ownedMatch = userSubscribedServices.some((sub) =>
+          availableServices.some(
+            (svc) =>
+              svc.toLowerCase().includes(sub.toLowerCase()) ||
+              sub.toLowerCase().includes(svc.toLowerCase())
+          )
+        );
+        if (ownedMatch) {
+          score += 15;
+        }
+      }
+
       const matchScore = Math.min(99, Math.max(68, score));
 
-      return {
+      scored.push({
         id: t._id.toString(),
         tmdbId: t.tmdbId,
         name: t.name,
@@ -110,11 +171,11 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
         synopsis: t.synopsis,
         matchScore,
         matchReason: genreMatches > 0
-          ? `${rationalePrefix} • Matches ${genreMatches} key genre${genreMatches > 1 ? 's' : ''}`
+          ? `${rationalePrefix} • Matches ${genreMatches} key genre${genreMatches > 1 ? 's' : ''}${ownedMatch ? ' • Ready to stream on your services' : ''}`
           : `${rationalePrefix} • Highly rated standout choice`,
-        streamingServices: ['Netflix', 'Prime Video', 'Max'],
-      };
-    });
+        streamingServices: availableServices.slice(0, 4),
+      });
+    }
 
     // Sort by highest match score
     scored.sort((a, b) => b.matchScore - a.matchScore);

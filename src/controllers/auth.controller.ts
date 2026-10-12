@@ -220,6 +220,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
           subscribedServices: user.subscribedServices,
           fatigueCount: user.fatigueCount,
           tasteProfile: user.tasteProfile,
+          onboarded: false,
         },
         token,
       },
@@ -280,6 +281,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           subscribedServices: user.subscribedServices,
           fatigueCount: user.fatigueCount,
           tasteProfile: user.tasteProfile,
+          onboarded: Boolean(user.onboarded || ((user.tasteProfile as any)?.favoriteGenres?.length > 0)),
         },
         token,
       },
@@ -308,7 +310,10 @@ export const getMe = async (req: IAuthRequest, res: Response, next: NextFunction
       return next(new AppError('User not found.', 404));
     }
 
-    sendSuccess(res, { user }, 'Current user retrieved successfully.');
+    const userObj = user.toObject();
+    const onboarded = Boolean(user.onboarded || ((userObj.tasteProfile as any)?.favoriteGenres?.length > 0));
+
+    sendSuccess(res, { user: { ...userObj, onboarded } }, 'Current user retrieved successfully.');
   } catch (error) {
     next(error);
   }

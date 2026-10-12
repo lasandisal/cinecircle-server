@@ -5,6 +5,7 @@ import {
   searchPeople,
   updateTasteProfile,
   updateSubscribedServices,
+  completeOnboarding,
   toggleFollow,
   getUserSuggestions,
 } from '../controllers/user.controller';
@@ -19,6 +20,7 @@ router.put('/profile', authenticate, updateProfile);
 router.get('/:userId/profile', optionalAuthenticate, getProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
+router.post('/onboarding', authenticate, completeOnboarding);
 router.post('/follow', authenticate, toggleFollow);
 
 export default router;
