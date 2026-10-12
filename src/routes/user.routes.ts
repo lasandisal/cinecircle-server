@@ -8,11 +8,13 @@ import {
   completeOnboarding,
   toggleFollow,
   getUserSuggestions,
+  getNotifications,
 } from '../controllers/user.controller';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
+router.get('/notifications', optionalAuthenticate, getNotifications);
 router.get('/suggestions', optionalAuthenticate, getUserSuggestions);
 router.get('/search', optionalAuthenticate, searchPeople);
 router.get('/profile', authenticate, getProfile);

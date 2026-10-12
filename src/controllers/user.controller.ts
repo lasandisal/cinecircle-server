@@ -369,3 +369,93 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
     next(error);
   }
 };
+
+/**
+ * Get real dynamic notifications for the user
+ * GET /api/users/notifications
+ */
+export const getNotifications = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      sendSuccess(res, { notifications: [] }, 'No notifications for guest');
+      return;
+    }
+
+    const notifications: any[] = [];
+
+    // 1. Real Circle Sessions where user is a participant or recent active rooms
+    const userSessions = await Session.find({
+      participants: userId,
+      status: 'open',
+    })
+      .populate('host', 'name avatar handle')
+      .sort({ createdAt: -1 })
+      .limit(4)
+      .lean();
+
+    for (const s of userSessions) {
+      const hostName = (s.host as any)?.name || 'Watch Circle Host';
+      const hostAvatar = (s.host as any)?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(hostName)}&background=6366f1&color=fff`;
+      const isHost = (s.host as any)?._id?.toString() === userId.toString();
+
+      notifications.push({
+        id: `session-${s._id}`,
+        type: 'circle',
+        actorName: hostName,
+        actorAvatar: hostAvatar,
+        title: isHost
+          ? `Your watch circle "${s.name}" is active and voting.`
+          : `invited you to join live watch circle: "${s.name}"`,
+        detail: `Room Code: #${s.joinCode} • ${s.participants?.length || 1} participant(s)`,
+        timestamp: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Recent',
+        read: false,
+        actionUrl: `/group`,
+        actionText: 'Enter Room',
+        createdAt: s.createdAt,
+      });
+    }
+
+    // 2. Real Followers who followed this user
+    const recentFollowers = await Follow.find({
+      followedType: 'user',
+      followedUser: userId,
+    })
+      .populate('follower', 'name avatar handle email')
+      .sort({ createdAt: -1 })
+      .limit(4)
+      .lean();
+
+    for (const f of recentFollowers) {
+      if (f.follower) {
+        const followerName = (f.follower as any).name || 'Community Member';
+        const followerAvatar = (f.follower as any).avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(followerName)}&background=6366f1&color=fff`;
+        notifications.push({
+          id: `follow-${f._id}`,
+          type: 'follow',
+          actorName: followerName,
+          actorAvatar: followerAvatar,
+          title: `started following you on CineCircle.`,
+          detail: (f.follower as any).handle || `@${(f.follower as any).name?.toLowerCase().replace(/\s+/g, '')}`,
+          timestamp: f.createdAt ? new Date(f.createdAt).toLocaleDateString() : 'Recent',
+          read: false,
+          actionUrl: `/profile/${(f.follower as any)._id}`,
+          actionText: 'View Profile',
+          createdAt: f.createdAt,
+        });
+      }
+    }
+
+    // Sort by newest first
+    notifications.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    sendSuccess(res, { notifications }, 'Real notifications retrieved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
