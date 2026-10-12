@@ -16,12 +16,12 @@ import {
   addTitleSoundtrack,
   getFeedActivity,
 } from '../controllers/title.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 
 // Feed activity
-router.get('/feed', getFeedActivity);
+router.get('/feed', optionalAuthenticate, getFeedActivity);
 
 // Music search for soundtrack discovery
 router.get('/music/search', searchMusic);

@@ -67,6 +67,25 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       ? Boolean(await Follow.findOne({ follower: req.user.id, followedType: 'user', followedUser: targetUserId }))
       : false;
 
+    let mutualWatchedTitles: any[] = [];
+    if (req.user && req.user.id !== targetUserId.toString()) {
+      const currentUserWatchedTitleIds = await Watchlist.find({
+        user: req.user.id,
+        watched: true,
+      }).distinct('title');
+
+      if (currentUserWatchedTitleIds.length > 0) {
+        mutualWatchedTitles = await Watchlist.find({
+          user: targetUserId,
+          watched: true,
+          title: { $in: currentUserWatchedTitleIds },
+        })
+          .populate('title', 'name posterUrl releaseYear type voteAverage runtimeMinutes')
+          .sort({ watchedAt: -1, addedAt: -1 })
+          .lean();
+      }
+    }
+
     sendSuccess(
       res,
       {
@@ -83,7 +102,9 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             followersCount,
             circlesCount,
             reviewsCount,
+            mutualWatchedCount: mutualWatchedTitles.length,
           },
+          mutualWatchedTitles: mutualWatchedTitles.filter((w) => w.title != null),
           recentWatched: recentWatchedDocs.filter((w) => w.title != null),
           savedWatchlist: recentWatchlistDocs.filter((w) => w.title != null),
           recentReviews: recentReviewsDocs.filter((r) => r.title != null),
@@ -352,6 +373,30 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
       .limit(6)
       .lean();
 
+    const currentUserWatchedTitleIds = currentUserId
+      ? await Watchlist.find({ user: currentUserId, watched: true }).distinct('title')
+      : [];
+    const candidateUserIds = users.map((user: any) => user._id);
+    const mutualCounts = new Map<string, number>();
+
+    if (currentUserWatchedTitleIds.length > 0 && candidateUserIds.length > 0) {
+      const mutualWatched = await Watchlist.aggregate([
+        {
+          $match: {
+            user: { $in: candidateUserIds },
+            watched: true,
+            title: { $in: currentUserWatchedTitleIds },
+          },
+        },
+        { $group: { _id: { user: '$user', title: '$title' } } },
+        { $group: { _id: '$_id.user', count: { $sum: 1 } } },
+      ]);
+
+      mutualWatched.forEach((entry) => {
+        mutualCounts.set(entry._id.toString(), entry.count);
+      });
+    }
+
     const matches = users.map((u: any, idx: number) => {
       const handle = u.handle || (u.email ? `@${u.email.split('@')[0]}` : `@${u.name.toLowerCase().replace(/\s+/g, '')}`);
       return {
@@ -360,7 +405,7 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
         handle,
         avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=${idx % 2 === 0 ? '6366f1' : '8b5cf6'}&color=fff`,
         matchScore: 84 + ((idx * 5) % 15),
-        mutualCount: 6 + ((idx * 3) % 12),
+        mutualCount: mutualCounts.get(u._id.toString()) || 0,
       };
     });
 
@@ -458,4 +503,3 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
     next(error);
   }
 };
-

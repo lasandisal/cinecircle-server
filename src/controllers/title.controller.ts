@@ -1034,7 +1034,7 @@ function formatRelativeTime(date: Date): string {
  * Get real social feed activity (community reviews, ratings, and discussions)
  * GET /api/titles/feed
  */
-export const getFeedActivity = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getFeedActivity = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { page = '1', limit = '10' } = req.query;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
@@ -1060,7 +1060,7 @@ export const getFeedActivity = async (req: Request, res: Response, next: NextFun
             name: authorName,
             handle: rawHandle,
             avatar: c.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorName)}&background=6366f1&color=fff`,
-            mutualCount: Math.floor(Math.random() * 8) + 3,
+            mutualCount: 0,
           },
           titleData: {
             id: c.title._id.toString(),
@@ -1088,9 +1088,39 @@ export const getFeedActivity = async (req: Request, res: Response, next: NextFun
         };
       });
 
+    if (req.user && posts.length > 0) {
+      const currentUserWatchedTitleIds = await Watchlist.find({
+        user: req.user.id,
+        watched: true,
+      }).distinct('title');
+
+      if (currentUserWatchedTitleIds.length > 0) {
+        const authorIds = comments
+          .filter((comment: any) => comment.title != null && comment.user != null)
+          .map((comment: any) => comment.user._id);
+        const mutualWatched = await Watchlist.aggregate([
+          {
+            $match: {
+              user: { $in: authorIds },
+              watched: true,
+              title: { $in: currentUserWatchedTitleIds },
+            },
+          },
+          { $group: { _id: { user: '$user', title: '$title' } } },
+          { $group: { _id: '$_id.user', count: { $sum: 1 } } },
+        ]);
+        const mutualCounts = new Map(mutualWatched.map((entry) => [entry._id.toString(), entry.count]));
+
+        comments
+          .filter((comment: any) => comment.title != null && comment.user != null)
+          .forEach((comment: any, index: number) => {
+            posts[index].author.mutualCount = mutualCounts.get(comment.user._id.toString()) || 0;
+          });
+      }
+    }
+
     sendSuccess(res, { posts }, 'Feed activity retrieved successfully');
   } catch (error) {
     next(error);
   }
 };
-
