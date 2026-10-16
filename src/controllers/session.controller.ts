@@ -107,6 +107,28 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
 };
 
 /**
+ * Strip internal fields from populated user refs.
+ *
+ * GET /sessions/active and GET /sessions/code/:code are public, and both used
+ * to return host + participant emails plus every voter's identity to anonymous
+ * callers. Only display-safe fields are returned now.
+ */
+function sanitizePeople(doc: any): any {
+  if (!doc) return doc;
+  const { email, passwordHash, subscribedServices, tasteProfile, fatigueCount, ...safe } = doc;
+  return safe;
+}
+
+function sanitizeSessionPeople(session: any): any {
+  if (!session) return session;
+  if (session.host) session.host = sanitizePeople(session.host);
+  if (Array.isArray(session.participants)) {
+    session.participants = session.participants.map(sanitizePeople);
+  }
+  return session;
+}
+
+/**
  * Retrieve all currently active open sessions (for circles carousel)
  * GET /api/sessions/active
  */
@@ -164,6 +186,7 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
           return true;
         });
       }
+      sanitizeSessionPeople(s);
 
       const perTitle = tallyBySession.get(s._id.toString());
       const participantCount = (s.participants || []).length || 1;
@@ -207,13 +230,15 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
     }
 
     const populatedSession = await getPopulatedSession(sessionDoc._id);
+    sanitizeSessionPeople(populatedSession);
 
-    // Also get all votes for this session
+    // Votes are public too - strip emails from voter records.
     const votes = await Vote.find({ session: sessionDoc._id })
       .populate('user', 'name email avatar')
       .lean();
+    const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
 
-    sendSuccess(res, { session: populatedSession, votes }, 'Session retrieved successfully');
+    sendSuccess(res, { session: populatedSession, votes: safeVotes }, 'Session retrieved successfully');
   } catch (error) {
     next(error);
   }
@@ -238,6 +263,8 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
       const { session, alreadyPresent } = await SessionService.joinByCode(joinCode, userId);
       const populatedSession = await getPopulatedSession(session._id);
       const votes = await SessionService.getVotes(session._id.toString());
+      const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
+      sanitizeSessionPeople(populatedSession);
 
       if (!alreadyPresent) {
         SocketService.emitToSession(session._id.toString(), 'participant:joined', {
@@ -246,7 +273,7 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
         });
       }
 
-      sendSuccess(res, { session: populatedSession, votes }, 'Joined session successfully');
+      sendSuccess(res, { session: populatedSession, votes: safeVotes }, 'Joined session successfully');
     } catch (err: any) {
       next(err instanceof SessionServiceError ? new AppError(err.message, err.statusCode) : err);
     }
@@ -276,6 +303,15 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
 
     if (session.status !== 'open') {
       return next(new AppError('Cannot add titles to a closed/finalized session', 400));
+    }
+
+    // Membership check. This endpoint previously required only *authentication*,
+    // so any signed-in user could add candidates to any room, including rooms
+    // they were not part of.
+    if (!SessionService.isMember(session, userId)) {
+      return next(
+        new AppError('Join the room with its code before adding candidates', 403)
+      );
     }
 
     let finalTitleId = titleId;
@@ -362,12 +398,17 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
     });
 
     const populatedSession = await getPopulatedSession(sessionId);
+    sanitizeSessionPeople(populatedSession);
 
     const votes = await Vote.find({ session: sessionId })
       .populate('user', 'name email avatar')
       .lean();
 
-    sendSuccess(res, { session: populatedSession, votes }, 'Title added to session shortlist successfully');
+    sendSuccess(
+      res,
+      { session: populatedSession, votes: votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) })) },
+      'Title added to session shortlist successfully'
+    );
   } catch (error) {
     next(error);
   }
@@ -394,11 +435,18 @@ export const removeTitleFromShortlist = async (req: IAuthRequest, res: Response,
       return next(new AppError('Cannot modify a closed session', 400));
     }
 
+    // Removing a candidate is more destructive than adding one, so it is
+    // host-only. Previously any authenticated user could strip any room.
+    if (!SessionService.isHost(session, userId)) {
+      return next(new AppError('Only the room host can remove candidates', 403));
+    }
+
     await Session.findByIdAndUpdate(sessionId, {
       $pull: { shortlist: titleId },
     });
 
     const populatedSession = await getPopulatedSession(sessionId);
+    sanitizeSessionPeople(populatedSession);
 
     sendSuccess(res, { session: populatedSession }, 'Title removed from shortlist');
   } catch (error) {

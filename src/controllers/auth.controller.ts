@@ -140,7 +140,8 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
  */
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, email, password, otp, role } = req.body;
+    // `role` is intentionally NOT destructured from the body - see below.
+    const { name, email, password, otp } = req.body;
 
     if (!name || !email || !password) {
       return next(new AppError('Name, email, and password are required.', 400));
@@ -184,12 +185,16 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Create user.
+    // The role is ALWAYS 'user' here. Previously this honoured a `role` field
+    // from the request body, so `POST /api/auth/register` with
+    // {"role":"admin"} produced an admin account, which then unlocked
+    // /api/curator/comments/* (moderation powers).
     const user = new User({
       name: name.trim(),
       email: cleanEmail,
       passwordHash,
-      role: role === 'admin' ? 'admin' : 'user',
+      role: 'user',
       subscribedServices: [],
       fatigueCount: 0,
     });
