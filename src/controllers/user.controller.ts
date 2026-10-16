@@ -5,10 +5,39 @@ import { sendSuccess } from '../utils/response';
 import { AppError } from '../middleware/error.middleware';
 import { CompatibilityService } from '../services/compatibility.service';
 import { RecommendationService } from '../services/recommendation.service';
+import { FollowService, FollowError } from '../services/follow.service';
+import mongoose from 'mongoose';
 
 /** Escape user input before it reaches a MongoDB $regex. */
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Redact a user document for someone who is not the owner.
+ *
+ * Profiles are readable by anyone (including guests), so returning `email`,
+ * `role`, `fatigueCount` and `onboarded` leaked personal data that was then
+ * rendered publicly on the profile page.
+ */
+function redactUserForViewer(user: any, viewerId?: string, viewerRole?: string) {
+  const isOwner = !!viewerId && user._id.toString() === viewerId;
+  const isAdmin = viewerRole === 'admin';
+  if (isOwner || isAdmin) return user;
+
+  const { email, passwordHash, fatigueCount, onboarded, ...publicFields } = user;
+  return {
+    ...publicFields,
+    // Masked so a member is still identifiable in the UI without exposing it.
+    email: email ? maskEmail(email) : undefined,
+  };
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = String(email).split('@');
+  if (!domain) return '•••';
+  const visible = local.slice(0, 2);
+  return `${visible}${'•'.repeat(Math.max(2, local.length - 2))}@${domain}`;
 }
 
 /**
@@ -27,12 +56,16 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       return next(new AppError('User not found', 404));
     }
 
+    const safeUser = redactUserForViewer(user, req.user?.id, req.user?.role);
+
     const [
       tasteProfile,
       watchlistCount,
       watchedCount,
-      followingCount,
-      followersCount,
+      // Both follow counts come from one place and are filtered consistently,
+      // plus the mutual-connection count. Previously followingCount skipped the
+      // followedType filter while followersCount applied it.
+      followCounts,
       circlesCount,
       reviewsCount,
       recentWatchedDocs,
@@ -43,8 +76,7 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       TasteProfile.findOne({ user: targetUserId }).lean(),
       Watchlist.countDocuments({ user: targetUserId, watched: false }),
       Watchlist.countDocuments({ user: targetUserId, watched: true }),
-      Follow.countDocuments({ follower: targetUserId }),
-      Follow.countDocuments({ followedType: 'user', followedUser: targetUserId }),
+      FollowService.getCounts(targetUserId.toString()),
       Session.countDocuments({ participants: targetUserId }),
       Comment.countDocuments({ user: targetUserId }),
       Watchlist.find({ user: targetUserId, watched: true })
@@ -70,9 +102,8 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
         .lean(),
     ]);
 
-    const isFollowing = req.user && req.user.id !== targetUserId.toString()
-      ? Boolean(await Follow.findOne({ follower: req.user.id, followedType: 'user', followedUser: targetUserId }))
-      : false;
+    const relationship = await FollowService.getRelationship(req.user?.id, targetUserId.toString());
+    const isFollowing = relationship.isFollowing;
 
     // Real compatibility between the viewer and this member. The UI previously
     // rendered a hardcoded "94% Circle Compatibility Synergy" derived from nothing.
@@ -104,16 +135,18 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       res,
       {
         profile: {
-          ...user,
+          ...safeUser,
           avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=6366f1&color=fff`,
+          // Derive the handle from the raw email, not the possibly-masked copy.
           handle: user.handle || `@${(user.email.split('@')[0] || user.name).toLowerCase().replace(/\s+/g, '')}`,
           bio: user.bio || 'Film lover & decision maker on CineCircle 🍿',
           tasteProfile,
           stats: {
             watchlistCount,
             watchedCount,
-            followingCount,
-            followersCount,
+            followingCount: followCounts.followingCount,
+            followersCount: followCounts.followersCount,
+            mutualConnectionsCount: followCounts.mutualConnectionsCount,
             circlesCount,
             reviewsCount,
             mutualWatchedCount: mutualWatchedTitles.length,
@@ -129,6 +162,9 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
           recentReviews: recentReviewsDocs.filter((r) => r.title != null),
           userCircles: userCirclesDocs,
           isFollowing,
+          isFollowedBy: relationship.isFollowedBy,
+          // A genuine two-way follow edge - distinct from "mutual watched titles".
+          isMutualConnection: relationship.isMutual,
           isSelf: req.user ? req.user.id === targetUserId.toString() : false,
         },
       },
@@ -431,14 +467,55 @@ export const toggleFollow = async (req: IAuthRequest, res: Response, next: NextF
       return next(new AppError('targetUserId is required', 400));
     }
 
-    const existing = await Follow.findOne({ follower: followerId, followedType: 'user', followedUser: targetUserId });
-    if (existing) {
-      await Follow.deleteOne({ _id: existing._id });
-      sendSuccess(res, { following: false }, 'Unfollowed user');
-    } else {
-      await Follow.create({ follower: followerId, followedType: 'user', followedUser: targetUserId });
-      sendSuccess(res, { following: true }, 'Followed user');
+    // Validates self-follow, malformed ids and target existence, then returns
+    // the resulting two-way relationship so the client does not have to guess.
+    const relationship = await FollowService.toggle(followerId, targetUserId);
+
+    sendSuccess(
+      res,
+      {
+        following: relationship.isFollowing,
+        isFollowedBy: relationship.isFollowedBy,
+        isMutual: relationship.isMutual,
+      },
+      relationship.isFollowing ? 'Followed member' : 'Unfollowed member'
+    );
+  } catch (error: any) {
+    next(error instanceof FollowError ? new AppError(error.message, error.statusCode) : error);
+  }
+};
+
+/**
+ * Full social graph for a member: who they follow, who follows them, and the
+ * two-way intersection (genuine connections).
+ * GET /api/users/:userId/connections
+ */
+export const getConnections = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const rawParam = req.params.userId;
+    const userId =
+      typeof rawParam === 'string' && rawParam !== 'me' && rawParam !== '' ? rawParam : req.user?.id;
+    if (!userId) {
+      return next(new AppError('User ID is required', 400));
     }
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return next(new AppError('Invalid user id', 400));
+    }
+
+    const [graph, counts] = await Promise.all([
+      FollowService.getGraph(userId),
+      FollowService.getCounts(userId),
+    ]);
+
+    // The viewer's relationship to this member, so the UI can render
+    // "Follows you" / "Mutual" badges.
+    const relationship = await FollowService.getRelationship(req.user?.id, userId);
+
+    sendSuccess(
+      res,
+      { ...graph, counts, viewerRelationship: relationship },
+      'Connections retrieved'
+    );
   } catch (error) {
     next(error);
   }

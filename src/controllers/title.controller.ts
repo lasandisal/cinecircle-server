@@ -10,6 +10,7 @@ import {
 import { tmdbService } from '../services/TmdbService';
 import { SeedService } from '../services/SeedService';
 import { SoundtrackService } from '../services/SoundtrackService';
+import { FollowService } from '../services/follow.service';
 import { sendSuccess } from '../utils/response';
 import type { IAuthRequest } from '../types';
 import mongoose from 'mongoose';
@@ -1284,7 +1285,29 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(30, Math.max(1, parseInt(limit as string, 10) || 10));
 
-    const comments = await Comment.find({ parentId: null, hidden: false })
+    // Feed filter. 'following' restricts the feed to people the viewer actually
+    // follows - previously the "Following Activity" tab rendered the identical
+    // global feed because no such filter existed.
+    const feedFilter = req.query.filter === 'following' ? 'following' : 'all';
+
+    const query: any = { parentId: null, hidden: false };
+
+    let followingIds: string[] = [];
+    if (feedFilter === 'following') {
+      followingIds = await FollowService.getFollowingIds(req.user?.id || '');
+      if (followingIds.length === 0) {
+        // Nothing followed yet - return an empty feed rather than everything.
+        sendSuccess(
+          res,
+          { posts: [], filter: feedFilter, followingCount: 0 },
+          'Follow some members to see their activity here'
+        );
+        return;
+      }
+      query.user = { $in: followingIds };
+    }
+
+    const comments = await Comment.find(query)
       .populate('user', 'name avatar handle email')
       .populate('title', 'name posterUrl releaseYear type genres runtimeMinutes voteAverage')
       .sort({ createdAt: -1 })
@@ -1320,8 +1343,21 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       replyRows.map((r: any) => [r._id.toString(), r.count])
     );
 
-    const posts = comments
-      .filter((c: any) => c.title != null && c.user != null)
+    // Which authors are genuine two-way connections with the viewer.
+    const myMutualIds = new Set<string>(
+      req.user
+        ? (await FollowService.getGraph(req.user.id)).mutuals.map((m: any) => m.id)
+        : []
+    );
+
+    // Filter FIRST, then map. Filtering and mapping in the same chain while
+    // writing back by index elsewhere would desynchronise the indices as soon
+    // as a single comment references a deleted title.
+    const visibleComments = comments.filter(
+      (c: any) => c.title != null && c.user != null
+    );
+
+    const posts = visibleComments
       .map((c: any) => {
         const authorName = c.user.name || 'Cinephile';
         const rawHandle = c.user.email ? `@${c.user.email.split('@')[0]}` : `@${authorName.toLowerCase().replace(/\s+/g, '')}`;
@@ -1333,6 +1369,8 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
             handle: rawHandle,
             avatar: c.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorName)}&background=6366f1&color=fff`,
             mutualCount: 0,
+            // Whether the author and the viewer have a two-way follow edge.
+            isConnection: myMutualIds.has(c.user._id.toString()),
           },
           titleData: {
             id: c.title._id.toString(),
@@ -1393,7 +1431,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       }
     }
 
-    sendSuccess(res, { posts }, 'Feed activity retrieved successfully');
+    sendSuccess(res, { posts, filter: feedFilter, followingCount: followingIds.length }, 'Feed activity retrieved successfully');
   } catch (error) {
     next(error);
   }

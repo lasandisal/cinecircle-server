@@ -8,6 +8,7 @@ import {
   updateSubscribedServices,
   completeOnboarding,
   toggleFollow,
+  getConnections,
   getUserSuggestions,
   getNotifications,
 } from '../controllers/user.controller';
@@ -20,7 +21,10 @@ router.get('/suggestions', optionalAuthenticate, getUserSuggestions);
 router.get('/search', optionalAuthenticate, searchPeople);
 router.get('/profile', authenticate, getProfile);
 router.put('/profile', authenticate, updateProfile);
+// No :userId segment -> the controller falls back to the signed-in member.
+router.get('/connections', authenticate, getConnections);
 router.get('/:userId/profile', optionalAuthenticate, getProfile);
+router.get('/:userId/connections', optionalAuthenticate, getConnections);
 router.get('/taste-profile', authenticate, getTasteProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
