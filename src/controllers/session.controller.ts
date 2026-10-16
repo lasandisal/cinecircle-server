@@ -120,8 +120,41 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
       .limit(10)
       .lean();
 
+    // Real per-candidate vote tallies so the poll card can show actual
+    // percentages instead of index-derived ones.
+    const sessionIds = sessions.map((s: any) => s._id);
+    const voteRows = sessionIds.length
+      ? await Vote.aggregate([
+          { $match: { session: { $in: sessionIds } } },
+          {
+            $group: {
+              _id: { session: '$session', title: '$title', reaction: '$reaction' },
+              count: { $sum: 1 },
+              strength: { $sum: '$strength' },
+            },
+          },
+        ])
+      : [];
+
+    const tallyBySession = new Map<string, Map<string, { yes: number; no: number; net: number }>>();
+    for (const row of voteRows) {
+      const sid = row._id.session.toString();
+      const tid = row._id.title.toString();
+      if (!tallyBySession.has(sid)) tallyBySession.set(sid, new Map());
+      const perTitle = tallyBySession.get(sid)!;
+      if (!perTitle.has(tid)) perTitle.set(tid, { yes: 0, no: 0, net: 0 });
+      const entry = perTitle.get(tid)!;
+      if (row._id.reaction === 'yes') {
+        entry.yes += row.count;
+        entry.net += row.strength || row.count;
+      } else {
+        entry.no += row.count;
+        entry.net -= row.strength || row.count;
+      }
+    }
+
     // Deduplicate participants in active sessions
-    const sanitized = sessions.map((s) => {
+    const sanitized = sessions.map((s: any) => {
       if (s.participants) {
         const seen = new Set<string>();
         s.participants = s.participants.filter((p: any) => {
@@ -131,6 +164,25 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
           return true;
         });
       }
+
+      const perTitle = tallyBySession.get(s._id.toString());
+      const participantCount = (s.participants || []).length || 1;
+
+      s.voteTally = (s.shortlist || []).map((t: any) => {
+        const counts = perTitle?.get(t._id.toString()) || { yes: 0, no: 0, net: 0 };
+        const totalVotes = counts.yes + counts.no;
+        return {
+          titleId: t._id.toString(),
+          yes: counts.yes,
+          no: counts.no,
+          totalVotes,
+          // Real percentage of participants who voted yes.
+          yesPercent: Math.round((counts.yes / participantCount) * 100),
+          netScore: counts.net / participantCount,
+        };
+      });
+
+      s.participantCount = (s.participants || []).length;
       return s;
     });
 

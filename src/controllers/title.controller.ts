@@ -1292,6 +1292,34 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       .limit(limitNum)
       .lean();
 
+    // Real streaming availability per post. Previously every post in the feed
+    // claimed ['Max','Prime Video','Netflix'] regardless of the title.
+    const feedTitleIds = Array.from(
+      new Set(comments.map((c: any) => c.title?._id?.toString()).filter(Boolean))
+    );
+    const feedProviders = feedTitleIds.length
+      ? await WatchProvider.find({ title: { $in: feedTitleIds } }).lean()
+      : [];
+    const providersByTitle = new Map<string, string[]>();
+    for (const p of feedProviders) {
+      const key = p.title.toString();
+      if (!providersByTitle.has(key)) providersByTitle.set(key, []);
+      const list = providersByTitle.get(key)!;
+      if (!list.includes(p.service)) list.push(p.service);
+    }
+
+    // Real reply counts (previously always 0).
+    const feedCommentIds = comments.map((c: any) => c._id);
+    const replyRows = feedCommentIds.length
+      ? await Comment.aggregate([
+          { $match: { parentId: { $in: feedCommentIds } } },
+          { $group: { _id: '$parentId', count: { $sum: 1 } } },
+        ])
+      : [];
+    const repliesByParent = new Map<string, number>(
+      replyRows.map((r: any) => [r._id.toString(), r.count])
+    );
+
     const posts = comments
       .filter((c: any) => c.title != null && c.user != null)
       .map((c: any) => {
@@ -1309,17 +1337,19 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
           titleData: {
             id: c.title._id.toString(),
             name: c.title.name,
-            year: c.title.releaseYear || 2024,
+            year: c.title.releaseYear || null,
             poster: c.title.posterUrl || '',
-            genres: Array.isArray(c.title.genres) ? c.title.genres : ['Drama'],
-            runtime: c.title.runtimeMinutes ? `${c.title.runtimeMinutes} min` : 'Feature',
-            streamingServices: ['Max', 'Prime Video', 'Netflix'],
+            genres: Array.isArray(c.title.genres) ? c.title.genres : [],
+            runtime: c.title.runtimeMinutes ? `${c.title.runtimeMinutes} min` : null,
+            // Actual providers, or an empty list when we have no data.
+            streamingServices: providersByTitle.get(c.title._id.toString()) || [],
           },
-          rating: c.rating || 5,
+          // null when the reviewer did not rate - the UI must not invent 5 stars.
+          rating: typeof c.rating === 'number' ? c.rating : null,
           reviewText: c.text,
           timestamp: formatRelativeTime(c.createdAt),
           likesCount: c.likesCount || 0,
-          commentsCount: 0,
+          commentsCount: repliesByParent.get(c._id.toString()) || 0,
           poll: c.poll?.question
             ? {
                 question: c.poll.question,

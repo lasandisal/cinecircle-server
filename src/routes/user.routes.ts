@@ -3,6 +3,7 @@ import {
   getProfile,
   updateProfile,
   searchPeople,
+  getTasteProfile,
   updateTasteProfile,
   updateSubscribedServices,
   completeOnboarding,
@@ -20,6 +21,7 @@ router.get('/search', optionalAuthenticate, searchPeople);
 router.get('/profile', authenticate, getProfile);
 router.put('/profile', authenticate, updateProfile);
 router.get('/:userId/profile', optionalAuthenticate, getProfile);
+router.get('/taste-profile', authenticate, getTasteProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
 router.post('/onboarding', authenticate, completeOnboarding);

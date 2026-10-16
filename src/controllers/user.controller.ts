@@ -3,6 +3,13 @@ import { IAuthRequest } from '../types';
 import { User, TasteProfile, Watchlist, Follow, Session, Comment } from '../models';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middleware/error.middleware';
+import { CompatibilityService } from '../services/compatibility.service';
+import { RecommendationService } from '../services/recommendation.service';
+
+/** Escape user input before it reaches a MongoDB $regex. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
  * Get Instagram-like comprehensive user profile
@@ -67,6 +74,13 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       ? Boolean(await Follow.findOne({ follower: req.user.id, followedType: 'user', followedUser: targetUserId }))
       : false;
 
+    // Real compatibility between the viewer and this member. The UI previously
+    // rendered a hardcoded "94% Circle Compatibility Synergy" derived from nothing.
+    const compatibility = await CompatibilityService.compute(
+      targetUserId.toString(),
+      req.user?.id
+    );
+
     let mutualWatchedTitles: any[] = [];
     if (req.user && req.user.id !== targetUserId.toString()) {
       const currentUserWatchedTitleIds = await Watchlist.find({
@@ -103,6 +117,11 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             circlesCount,
             reviewsCount,
             mutualWatchedCount: mutualWatchedTitles.length,
+            // null when there is no shared signal - the UI must say so rather
+            // than showing a flattering invented number.
+            circleCompatibility: compatibility.score,
+            circleCompatibilityBasis: compatibility.basis,
+            circleCompatibilityExplanation: compatibility.explanation,
           },
           mutualWatchedTitles: mutualWatchedTitles.filter((w) => w.title != null),
           recentWatched: recentWatchedDocs.filter((w) => w.title != null),
@@ -168,12 +187,17 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
     }
 
     if (q && typeof q === 'string' && q.trim()) {
-      const term = q.trim();
+      const term = escapeRegex(q.trim());
       query.$or = [
         { name: { $regex: term, $options: 'i' } },
         { email: { $regex: term, $options: 'i' } },
         { handle: { $regex: term, $options: 'i' } },
       ];
+    }
+
+    // Never list the searcher themselves (they would always "match" at 100%).
+    if (currentUserId) {
+      query._id = { $ne: currentUserId };
     }
 
     const users = await User.find(query)
@@ -188,27 +212,53 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
       followingIds = new Set(follows.map((f: any) => f.followedUser?.toString()));
     }
 
+    // Real per-candidate counts in two group-by queries instead of 3N
+    // countDocuments calls inside a map.
+    const userIds = users.map((u: any) => u._id);
+    const [watchedRows, circleRows, followerRows, compatByUser] = await Promise.all([
+      Watchlist.aggregate([
+        { $match: { user: { $in: userIds }, watched: true } },
+        { $group: { _id: '$user', count: { $sum: 1 } } },
+      ]),
+      Session.aggregate([
+        { $match: { participants: { $in: userIds } } },
+        { $group: { _id: '$participants', count: { $sum: 1 } } },
+      ]),
+      Follow.aggregate([
+        { $match: { followedType: 'user', followedUser: { $in: userIds } } },
+        { $group: { _id: '$followedUser', count: { $sum: 1 } } },
+      ]),
+      CompatibilityService.computeBatch(currentUserId, userIds.map((id: any) => id.toString())),
+    ]);
+
+    const countFor = (rows: any[], keyField: string, id: string) => {
+      const row = rows.find((r) => r._id?.toString() === id);
+      return row ? row.count : 0;
+    };
+
     const people = await Promise.all(
-      users.map(async (u: any, idx: number) => {
-        const watchedCount = await Watchlist.countDocuments({ user: u._id, watched: true });
-        const circlesCount = await Session.countDocuments({ participants: u._id });
-        const followersCount = await Follow.countDocuments({ followedType: 'user', followedUser: u._id });
+      users.map(async (u: any) => {
+        const id = u._id.toString();
+        const compat = compatByUser.get(id);
 
         return {
-          id: u._id.toString(),
+          id,
           name: u.name,
           email: u.email,
           handle: u.handle || `@${(u.email.split('@')[0] || u.name).toLowerCase().replace(/\s+/g, '')}`,
           avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=6366f1&color=fff`,
           bio: u.bio || 'Movie enthusiast & CineCircle circle member',
           role: u.role,
-          isFollowing: followingIds.has(u._id.toString()),
+          isFollowing: followingIds.has(id),
           stats: {
-            watchedCount,
-            circlesCount,
-            followersCount,
+            watchedCount: countFor(watchedRows, 'user', id),
+            circlesCount: countFor(circleRows, 'participants', id),
+            followersCount: countFor(followerRows, 'followedUser', id),
           },
-          matchScore: 82 + ((idx * 6) % 17),
+          // Real compatibility, or null when there is nothing to compare.
+          matchScore: compat?.score ?? null,
+          matchExplanation: compat?.explanation || '',
+          mutualWatchedCount: compat?.mutualWatchedCount ?? 0,
         };
       })
     );
@@ -264,6 +314,44 @@ export const completeOnboarding = async (req: IAuthRequest, res: Response, next:
         tasteProfile: profile,
       },
       'Onboarding completed successfully'
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Read the member's taste profile, computing recency-weighted genre affinities
+ * from their WatchHistory on first call.
+ * GET /api/users/taste-profile
+ */
+export const getTasteProfile = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const profile = await TasteProfile.findOne({ user: userId }).lean();
+
+    // Freshen the weighted profile on read so onboarding can report real numbers.
+    const computed = await RecommendationService.computeRecencyWeightedTasteProfile(userId);
+
+    sendSuccess(
+      res,
+      {
+        tasteProfile: {
+          favoriteGenres: profile?.favoriteGenres || [],
+          favoriteTitles: (profile?.favoriteTitles || []).map((t: any) => t.toString()),
+          exclusions: profile?.exclusions || [],
+          // Use the freshly computed values. Reading the stored Map directly
+          // returned the schema default `{}` on profiles never written to.
+          genreScores: computed.genreScores,
+          historyEvents: computed.totalEvents,
+          tasteComputedAt: computed.lastComputedAt,
+        },
+      },
+      'Taste profile retrieved'
     );
   } catch (error) {
     next(error);
@@ -397,17 +485,30 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
       });
     }
 
+    // Real compatibility per suggestion, or null when there is no shared signal.
+    const compatByUser = await CompatibilityService.computeBatch(
+      currentUserId,
+      candidateUserIds.map((id: any) => id.toString())
+    );
+
     const matches = users.map((u: any, idx: number) => {
       const handle = u.handle || (u.email ? `@${u.email.split('@')[0]}` : `@${u.name.toLowerCase().replace(/\s+/g, '')}`);
+      const id = u._id.toString();
+      const compat = compatByUser.get(id);
       return {
-        id: u._id.toString(),
+        id,
         name: u.name,
         handle,
         avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=${idx % 2 === 0 ? '6366f1' : '8b5cf6'}&color=fff`,
-        matchScore: 84 + ((idx * 5) % 15),
-        mutualCount: mutualCounts.get(u._id.toString()) || 0,
+        // null = "not enough shared history", not an invented number.
+        matchScore: compat?.score ?? null,
+        matchExplanation: compat?.explanation || '',
+        mutualCount: compat?.mutualWatchedCount ?? 0,
       };
     });
+
+    // Surface the genuinely most-compatible people first.
+    matches.sort((a: any, b: any) => (b.matchScore ?? -1) - (a.matchScore ?? -1));
 
     sendSuccess(res, { users: matches }, 'User suggestions retrieved');
   } catch (error) {
