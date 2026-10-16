@@ -31,8 +31,21 @@ const CommentSchema = new Schema<ICommentDocument>(
       ],
     },
     containsSpoilers: { type: Boolean, default: false },
-    reported: { type: Boolean, default: false },
-    hidden: { type: Boolean, default: false },
+    reported: { type: Boolean, default: false, index: true },
+    hidden: { type: Boolean, default: false, index: true },
+    // Moderation audit trail. `reports[].user` is checked in code so one member
+    // cannot flag the same comment twice.
+    reports: [
+      {
+        user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        reason: { type: String, default: '' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    reportCount: { type: Number, default: 0 },
+    reportedAt: { type: Date },
+    hiddenAt: { type: Date },
+    hiddenBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );

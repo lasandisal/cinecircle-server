@@ -2,10 +2,12 @@ import { Response, NextFunction } from 'express';
 import { IAuthRequest } from '../types';
 import { sendSuccess } from '../utils/response';
 import { Title } from '../models/title.model';
+import { Comment } from '../models/comment.model';
 import { Soundtrack } from '../models/soundtrack.model';
 import { SeasonEpisode } from '../models/seasonEpisode.model';
 import { SoundtrackService } from '../services/SoundtrackService';
 import { AppError } from '../middleware/error.middleware';
+import mongoose from 'mongoose';
 import axios from 'axios';
 import { ENV } from '../config/env';
 
@@ -226,19 +228,101 @@ export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, ne
   }
 };
 
-export const moderateComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+/**
+ * Moderation queue: every comment that at least one member has reported.
+ *
+ * Was a stub returning `{ reportedComments: [] }`, which meant the moderation
+ * queue could never display anything.
+ */
+export const getFlaggedComments = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // Skeleton: Admin/curator reviews flagged comment (hide/dismiss)
-    sendSuccess(res, { comment: null }, 'Comment moderation updated');
+    const status = req.query.status === 'resolved' ? 'resolved' : 'open';
+
+    const filter: any =
+      status === 'open'
+        ? { reported: true, hidden: false }
+        : { $or: [{ hidden: true }, { reported: false, reportCount: { $gt: 0 } }] };
+
+    const comments = await Comment.find(filter)
+      .populate('user', 'name email avatar handle')
+      .populate('title', 'name posterUrl releaseYear type')
+      .populate('reports.user', 'name handle avatar')
+      .sort({ reportCount: -1, reportedAt: -1 })
+      .limit(100)
+      .lean();
+
+    sendSuccess(
+      res,
+      {
+        reportedComments: comments,
+        openCount: await Comment.countDocuments({ reported: true, hidden: false }),
+      },
+      'Flagged comments retrieved'
+    );
   } catch (error) {
     next(error);
   }
 };
 
-export const getFlaggedComments = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+/**
+ * Apply a moderation decision to a flagged comment.
+ *
+ * action = 'hide'    -> remove from all public reads, keep for audit
+ * action = 'dismiss' -> clear the report flags, leave the comment visible
+ */
+export const moderateComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // Skeleton: Get reported comments for curation
-    sendSuccess(res, { reportedComments: [] }, 'Flagged comments retrieved');
+    const commentId = String(req.params.commentId);
+    const action = String(req.body?.action || '').toLowerCase();
+    const moderatorId = req.user?.id;
+
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+      return next(new AppError('Invalid comment id', 400));
+    }
+    if (action !== 'hide' && action !== 'dismiss') {
+      return next(new AppError("action must be either 'hide' or 'dismiss'", 400));
+    }
+
+    const comment = await Comment.findById(commentId);
+    if (!comment) {
+      return next(new AppError('Comment not found', 404));
+    }
+
+    if (action === 'hide') {
+      comment.hidden = true;
+      comment.hiddenAt = new Date();
+      comment.hiddenBy = new mongoose.Types.ObjectId(moderatorId);
+    } else {
+      comment.reported = false;
+      comment.reports = [];
+      comment.reportCount = 0;
+      comment.reportedAt = undefined;
+    }
+
+    await comment.save();
+
+    const populated = await Comment.findById(comment._id)
+      .populate('user', 'name email avatar handle')
+      .populate('title', 'name posterUrl releaseYear type');
+
+    if (!populated) {
+      return next(new AppError('Comment not found after update', 404));
+    }
+
+    sendSuccess(
+      res,
+      {
+        comment: {
+          _id: populated._id,
+          text: populated.text,
+          hidden: populated.hidden,
+          reported: populated.reported,
+          reportCount: populated.reportCount,
+        },
+        action,
+      },
+      action === 'hide' ? 'Comment hidden from the community' : 'Report dismissed'
+    );
   } catch (error) {
     next(error);
   }

@@ -4,6 +4,8 @@ import { Session, Title, User, Vote } from '../models';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
 import { tmdbService } from '../services/TmdbService';
+import { SessionService, SessionServiceError } from '../services/session.service';
+import { SocketService } from '../services/socket.service';
 
 /**
  * Generate a unique 6-character room code (e.g., SCI890)
@@ -177,30 +179,25 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
     }
 
     const { joinCode } = req.body;
-    if (!joinCode) {
-      return next(new AppError('joinCode is required', 400));
+
+    try {
+      // Same code path the socket uses, including the "closed rooms are not
+      // joinable" rule.
+      const { session, alreadyPresent } = await SessionService.joinByCode(joinCode, userId);
+      const populatedSession = await getPopulatedSession(session._id);
+      const votes = await SessionService.getVotes(session._id.toString());
+
+      if (!alreadyPresent) {
+        SocketService.emitToSession(session._id.toString(), 'participant:joined', {
+          sessionId: session._id.toString(),
+          user: { id: userId },
+        });
+      }
+
+      sendSuccess(res, { session: populatedSession, votes }, 'Joined session successfully');
+    } catch (err: any) {
+      next(err instanceof SessionServiceError ? new AppError(err.message, err.statusCode) : err);
     }
-
-    const cleanCode = joinCode.toUpperCase().trim();
-
-    // Atomic $addToSet guarantees an ID can NEVER be added more than once
-    const session = await Session.findOneAndUpdate(
-      { joinCode: cleanCode },
-      { $addToSet: { participants: userId } },
-      { new: true }
-    );
-
-    if (!session) {
-      return next(new AppError(`No active session found with code ${cleanCode}`, 404));
-    }
-
-    const populatedSession = await getPopulatedSession(session._id);
-
-    const votes = await Vote.find({ session: session._id })
-      .populate('user', 'name email avatar')
-      .lean();
-
-    sendSuccess(res, { session: populatedSession, votes }, 'Joined session successfully');
   } catch (error) {
     next(error);
   }
@@ -368,26 +365,26 @@ export const submitVote = async (req: IAuthRequest, res: Response, next: NextFun
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { sessionId } = req.params;
+    const sessionId = String(req.params.sessionId);
     const { titleId, reaction = 'yes', strength = 3 } = req.body;
 
-    if (!titleId) {
-      return next(new AppError('titleId is required to vote', 400));
+    try {
+      const { vote, votes } = await SessionService.castVote({
+        sessionId,
+        userId,
+        titleId,
+        reaction,
+        strength,
+      });
+
+      // Push the new tally to every connected participant immediately instead of
+      // making them wait for the next poll.
+      SocketService.emitToSession(sessionId, 'vote:updated', { sessionId, votes, vote });
+
+      sendSuccess(res, { vote, votes }, 'Vote recorded successfully');
+    } catch (err: any) {
+      next(err instanceof SessionServiceError ? new AppError(err.message, err.statusCode) : err);
     }
-
-    const vote = await Vote.findOneAndUpdate(
-      { session: sessionId, user: userId, title: titleId },
-      {
-        session: sessionId,
-        user: userId,
-        title: titleId,
-        reaction: reaction === 'no' ? 'no' : 'yes',
-        strength: Math.min(5, Math.max(1, Number(strength) || 3)),
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-
-    sendSuccess(res, { vote }, 'Vote recorded successfully');
   } catch (error) {
     next(error);
   }
@@ -404,54 +401,25 @@ export const lockSessionPick = async (req: IAuthRequest, res: Response, next: Ne
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { sessionId } = req.params;
-    const session = await Session.findById(sessionId);
+    const sessionId = String(req.params.sessionId);
 
-    if (!session) {
-      return next(new AppError('Session not found', 404));
+    try {
+      // Shared with the socket path so both produce identical state and rules.
+      const result = await SessionService.finalize(sessionId, userId);
+
+      // Announce the result to every connected participant immediately.
+      SocketService.emitToSession(sessionId, 'session:finalized', result);
+
+      sendSuccess(
+        res,
+        result,
+        result.winnerId
+          ? 'Session decision finalized successfully'
+          : 'Session closed with no decision'
+      );
+    } catch (err: any) {
+      next(err instanceof SessionServiceError ? new AppError(err.message, err.statusCode) : err);
     }
-
-    // Only host can lock session
-    if (session.host.toString() !== userId.toString()) {
-      return next(new AppError('Only the room host can finalize the decision pick', 403));
-    }
-
-    // Tally votes for each candidate in shortlist
-    const votes = await Vote.find({ session: sessionId }).lean();
-    const scores: Record<string, number> = {};
-
-    session.shortlist.forEach((tId) => {
-      scores[tId.toString()] = 0;
-    });
-
-    votes.forEach((v) => {
-      const tKey = v.title.toString();
-      if (scores[tKey] !== undefined) {
-        if (v.reaction === 'yes') {
-          scores[tKey] += v.strength || 3;
-        } else {
-          scores[tKey] -= v.strength || 2;
-        }
-      }
-    });
-
-    // Find highest score candidate
-    let winnerId = session.shortlist[0];
-    let maxScore = -Infinity;
-    for (const [tId, score] of Object.entries(scores)) {
-      if (score > maxScore) {
-        maxScore = score;
-        winnerId = tId as any;
-      }
-    }
-
-    session.finalPick = winnerId;
-    session.status = 'closed';
-    await session.save();
-
-    const finalizedSession = await getPopulatedSession(sessionId);
-
-    sendSuccess(res, { session: finalizedSession, winnerId }, 'Session decision finalized successfully');
   } catch (error) {
     next(error);
   }

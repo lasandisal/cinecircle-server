@@ -11,6 +11,7 @@ import {
   getComments,
   likeComment,
   reactToComment,
+  reportComment,
   voteCommentPoll,
   searchMusic,
   addTitleSoundtrack,
@@ -36,13 +37,16 @@ router.get('/search', searchTitles);
 router.post('/seed', seedTitles);
 
 // Title details, seasons & comments
-router.get('/:titleId', getTitleDetails);
+// optionalAuthenticate lets the response personalise `reportedByMe` per comment
+// without requiring a token for guests.
+router.get('/:titleId', optionalAuthenticate, getTitleDetails);
 router.get('/:titleId/seasons/:seasonNumber', getSeasonEpisodes);
 router.post('/:titleId/soundtracks', addTitleSoundtrack);
-router.get('/:titleId/comments', getComments);
+router.get('/:titleId/comments', optionalAuthenticate, getComments);
 router.post('/:titleId/comments', authenticate, addComment);
 router.post('/comments/:commentId/like', likeComment);
 router.post('/comments/:commentId/react', authenticate, reactToComment);
+router.post('/comments/:commentId/report', authenticate, reportComment);
 router.post('/comments/:commentId/poll/vote', authenticate, voteCommentPoll);
 
 export default router;

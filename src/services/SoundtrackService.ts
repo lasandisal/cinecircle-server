@@ -241,6 +241,41 @@ function cleanNormalize(text: string): string {
 export class SoundtrackService {
   private static cache = new Map<string, { previewUrl?: string; albumArtUrl?: string; appleMusicUrl?: string }>();
 
+  /** Discovery results held in memory so repeat page loads never re-hit iTunes. */
+  private static discoveryCache = new Map<string, { at: number; tracks: SoundtrackTrack[] }>();
+  /** Cache of user-facing music searches (query + title context). */
+  private static searchCache = new Map<string, { at: number; tracks: SoundtrackTrack[] }>();
+  /** In-flight discoveries, so N concurrent requests trigger one search, not N. */
+  private static inFlight = new Map<string, Promise<SoundtrackTrack[]>>();
+
+  private static readonly CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+  private static readonly ITUNES_TIMEOUT_MS = 4000;
+  private static readonly LOOKUP_CONCURRENCY = 6;
+
+  /**
+   * Run `worker` across `items` with a bounded number of concurrent HTTP calls.
+   * Used so a title's ~20 album queries resolve in a few batches instead of one
+   * after another (which used to block the whole title-detail request for 10-20s).
+   */
+  private static async mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T, index: number) => Promise<R>
+  ): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+
+    const runners = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        results[index] = await worker(items[index], index);
+      }
+    });
+
+    await Promise.all(runners);
+    return results;
+  }
+
   /**
    * Enrich song and artist with Apple iTunes Search API
    * Completely legal, free, official 30-sec preview stream & cover art
@@ -250,9 +285,12 @@ export class SoundtrackService {
     artist: string
   ): Promise<{ previewUrl?: string; albumArtUrl?: string; appleMusicUrl?: string }> {
     const cacheKey = `${songName.toLowerCase().trim()}::${artist.toLowerCase().trim()}`;
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!;
+    const cachedEntry = this.cache.get(cacheKey);
+    if (cachedEntry) {
+      return cachedEntry;
     }
+    // Keep the process-level cache bounded so long-running servers don't grow forever.
+    if (this.cache.size > 5000) this.cache.clear();
 
     try {
       const q = encodeURIComponent(`${songName} ${artist}`);
@@ -275,29 +313,78 @@ export class SoundtrackService {
   }
 
   /**
-   * Search iTunes music directly for user contribution
+   * Search iTunes music directly for user contribution.
+   *
+   * iTunes' search is fuzzy and returns catalogue noise first ("The Bear" ->
+   * My Morning Jacket), so every result is scored against what the user
+   * actually typed and, when supplied, against the title being viewed. Results
+   * with no textual relationship to the query are dropped instead of being shown.
+   *
+   * Network failures now propagate to the caller rather than being swallowed
+   * into an empty array, so the UI can tell the user "search failed" instead of
+   * showing a blank panel.
    */
-  public static async searchItunes(query: string): Promise<SoundtrackTrack[]> {
-    if (!query || !query.trim()) return [];
-    try {
-      const q = encodeURIComponent(query.trim());
-      const res = await axios.get(
-        `https://itunes.apple.com/search?term=${q}&entity=song&limit=12`,
-        { timeout: 3500 }
-      );
-      const results = res.data?.results || [];
-      return results.map((item: any, idx: number) => ({
-        songName: item.trackName || 'Unknown Title',
-        artist: item.artistName || 'Unknown Artist',
-        episodeRef: item.collectionName ? `From: ${item.collectionName}` : undefined,
-        popularityRank: idx + 1,
-        previewUrl: item.previewUrl || undefined,
-        albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
-        spotifyUrl: item.trackViewUrl || undefined,
-      }));
-    } catch {
-      return [];
+  public static async searchItunes(query: string, contextTitle?: string): Promise<SoundtrackTrack[]> {
+    const q = (query || '').trim();
+    if (!q) return [];
+
+    const cacheKey = `${contextTitle ? cleanNormalize(contextTitle) : ''}::${q.toLowerCase()}`;
+    const cached = this.searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < this.CACHE_TTL_MS) {
+      return cached.tracks;
     }
+
+    const res = await axios.get(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=25`,
+      { timeout: this.ITUNES_TIMEOUT_MS }
+    );
+    const raw: any[] = res.data?.results || [];
+
+    const normQuery = cleanNormalize(q);
+    const normContext = contextTitle ? cleanNormalize(contextTitle) : '';
+
+    const scored = raw
+      .map((item: any) => {
+        const track = cleanNormalize(item.trackName || '');
+        const artist = cleanNormalize(item.artistName || '');
+        const collection = cleanNormalize(item.collectionName || '');
+
+        let score = 0;
+        if (track === normQuery) score += 100;
+        else if (track.includes(normQuery)) score += 60;
+        // An exact artist match is the strongest signal. Without this, searching
+        // "Tom Odell" ranked "Fiction (feat. Tom Odell) - Kygo" above his actual
+        // tracks, because the feature credit matched the track *title*.
+        if (artist === normQuery) score += 110;
+        else if (artist.includes(normQuery)) score += 45;
+
+        // Prefer the version that actually belongs to the show/film being viewed.
+        if (normContext) {
+          if (collection.includes(normContext) || artist.includes(normContext)) score += 90;
+          if (track.includes(normContext)) score += 25;
+        }
+
+        // The modal can only preview tracks that ship a 30s preview.
+        if (item.previewUrl) score += 5;
+
+        return { item, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12);
+
+    const tracks: SoundtrackTrack[] = scored.map(({ item }, idx) => ({
+      songName: item.trackName || 'Unknown Title',
+      artist: item.artistName || 'Unknown Artist',
+      episodeRef: item.collectionName ? `From: ${item.collectionName}` : undefined,
+      popularityRank: idx + 1,
+      previewUrl: item.previewUrl || undefined,
+      albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
+      spotifyUrl: item.trackViewUrl || undefined,
+    }));
+
+    this.searchCache.set(cacheKey, { at: Date.now(), tracks });
+    return tracks;
   }
 
   /**
@@ -393,92 +480,106 @@ export class SoundtrackService {
     }
 
     // 3. Search iTunes for verified albums (collect up to 3 distinct albums, e.g. seasons, volumes, special karaoke)
+    //    All candidate queries run with bounded concurrency rather than one at a
+    //    time - the old sequential loop blocked the title-detail request for the
+    //    full 4s timeout of every query before it gave up (~20 queries worst case).
     const albumMap = new Map<number, any>();
 
-    for (const q of queries) {
+    const searchResults = await this.mapWithConcurrency(queries, this.LOOKUP_CONCURRENCY, async (q) => {
       try {
         const res = await axios.get('https://itunes.apple.com/search', {
           params: { term: q, entity: 'album', limit: 8 },
-          timeout: 4000,
+          timeout: this.ITUNES_TIMEOUT_MS,
         });
+        return res.data?.results || [];
+      } catch {
+        // A single failed query must not abort the whole discovery.
+        return [] as any[];
+      }
+    });
 
-        const albums = res.data?.results || [];
-        for (const a of albums) {
-          const nameNorm = cleanNormalize(a.collectionName || '');
-          const artistNorm = cleanNormalize(a.artistName || '');
-          const count = a.trackCount || 0;
+    for (const albums of searchResults) {
+      for (const a of albums) {
+        const nameNorm = cleanNormalize(a.collectionName || '');
+        const artistNorm = cleanNormalize(a.artistName || '');
+        const count = a.trackCount || 0;
 
-          // Disqualify cross-medium false positives:
-          if (mediaType === 'tv' && (nameNorm.includes('motion picture') || nameNorm.includes('movie soundtrack'))) {
-            continue;
-          }
-          if (mediaType === 'film' && (nameNorm.includes('television') || nameNorm.includes('series soundtrack') || nameNorm.includes('season '))) {
-            continue;
-          }
-
-          if (artistNorm === normTitle && !artistNorm.includes('cast') && !nameNorm.includes('soundtrack') && !nameNorm.includes('score') && !nameNorm.includes('ost')) {
-            continue;
-          }
-
-          const isSoundtrack =
-            nameNorm.includes('soundtrack') ||
-            nameNorm.includes('ost') ||
-            nameNorm.includes('score') ||
-            nameNorm.includes('music from') ||
-            nameNorm.includes('television soundtrack') ||
-            nameNorm.includes('series soundtrack') ||
-            nameNorm.includes('motion picture') ||
-            nameNorm.includes('omfgg') ||
-            nameNorm.includes('karaoke') ||
-            nameNorm.includes('dizi') ||
-            nameNorm.includes('muzik') ||
-            nameNorm.includes('jenerik') ||
-            nameNorm.includes('tema') ||
-            nameNorm.includes('banda sonora') ||
-            nameNorm.includes('trilha sonora') ||
-            nameNorm.includes('bande originale') ||
-            nameNorm.includes('colonna sonora') ||
-            nameNorm.includes('filmmusik') ||
-            nameNorm.includes('original series') ||
-            nameNorm.includes('television') ||
-            nameNorm.includes('theme') ||
-            nameNorm.includes('themes') ||
-            artistNorm.includes('soundtrack') ||
-            artistNorm.includes('cast') ||
-            artistNorm.includes('various artists') ||
-            artistNorm.includes('cem tuncer');
-
-          const mentionsTitle =
-            nameNorm.includes(normTitle) ||
-            artistNorm.includes(normTitle) ||
-            (normOrig && (nameNorm.includes(normOrig) || artistNorm.includes(normOrig))) ||
-            (titleWords.length > 0 && titleWords.every((w) => nameNorm.includes(w) || artistNorm.includes(w)));
-
-          if (isSoundtrack && mentionsTitle && count > 2) {
-            if (!albumMap.has(a.collectionId)) {
-              albumMap.set(a.collectionId, a);
-            }
-          }
+        // Disqualify cross-medium false positives:
+        if (mediaType === 'tv' && (nameNorm.includes('motion picture') || nameNorm.includes('movie soundtrack'))) {
+          continue;
+        }
+        if (mediaType === 'film' && (nameNorm.includes('television') || nameNorm.includes('series soundtrack') || nameNorm.includes('season '))) {
+          continue;
         }
 
-        if (albumMap.size >= 3) break;
-      } catch {
-        // try next candidate
+        if (artistNorm === normTitle && !artistNorm.includes('cast') && !nameNorm.includes('soundtrack') && !nameNorm.includes('score') && !nameNorm.includes('ost')) {
+          continue;
+        }
+
+        const isSoundtrack =
+          nameNorm.includes('soundtrack') ||
+          nameNorm.includes('ost') ||
+          nameNorm.includes('score') ||
+          nameNorm.includes('music from') ||
+          nameNorm.includes('television soundtrack') ||
+          nameNorm.includes('series soundtrack') ||
+          nameNorm.includes('motion picture') ||
+          nameNorm.includes('omfgg') ||
+          nameNorm.includes('karaoke') ||
+          nameNorm.includes('dizi') ||
+          nameNorm.includes('muzik') ||
+          nameNorm.includes('jenerik') ||
+          nameNorm.includes('tema') ||
+          nameNorm.includes('banda sonora') ||
+          nameNorm.includes('trilha sonora') ||
+          nameNorm.includes('bande originale') ||
+          nameNorm.includes('colonna sonora') ||
+          nameNorm.includes('filmmusik') ||
+          nameNorm.includes('original series') ||
+          nameNorm.includes('television') ||
+          nameNorm.includes('theme') ||
+          nameNorm.includes('themes') ||
+          artistNorm.includes('soundtrack') ||
+          artistNorm.includes('cast') ||
+          artistNorm.includes('various artists') ||
+          artistNorm.includes('cem tuncer');
+
+        const mentionsTitle =
+          nameNorm.includes(normTitle) ||
+          artistNorm.includes(normTitle) ||
+          (normOrig && (nameNorm.includes(normOrig) || artistNorm.includes(normOrig))) ||
+          (titleWords.length > 0 && titleWords.every((w) => nameNorm.includes(w) || artistNorm.includes(w)));
+
+        if (isSoundtrack && mentionsTitle && count > 2) {
+          if (!albumMap.has(a.collectionId)) {
+            albumMap.set(a.collectionId, a);
+          }
+        }
       }
+
+      if (albumMap.size >= 3) break;
     }
 
     if (albumMap.size > 0) {
       const allTracks: SoundtrackTrack[] = [];
       const seenSongNames = new Set<string>();
 
-      for (const matchedAlbum of Array.from(albumMap.values()).slice(0, 3)) {
+      const matchedAlbums = Array.from(albumMap.values()).slice(0, 3);
+
+      const lookups = await this.mapWithConcurrency(matchedAlbums, matchedAlbums.length || 1, async (matchedAlbum) => {
         try {
           const lookup = await axios.get('https://itunes.apple.com/lookup', {
             params: { id: matchedAlbum.collectionId, entity: 'song', limit: 30 },
-            timeout: 4000,
+            timeout: this.ITUNES_TIMEOUT_MS,
           });
+          return { album: matchedAlbum, tracks: (lookup.data?.results || []).slice(1) };
+        } catch {
+          return { album: matchedAlbum, tracks: [] as any[] };
+        }
+      });
 
-          const rawTracks = (lookup.data?.results || []).slice(1);
+      for (const { album: matchedAlbum, tracks: rawTracks } of lookups) {
+        {
           for (const item of rawTracks) {
             const rawName = item.trackName || 'Untitled Track';
             const normKey = rawName.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
@@ -495,8 +596,6 @@ export class SoundtrackService {
               spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
             });
           }
-        } catch {
-          // ignore lookup error and continue
         }
       }
 
@@ -581,8 +680,41 @@ export class SoundtrackService {
   /**
    * Get iconic soundtracks for any movie or TV series automatically.
    * Auto-enriches with official 30-second audio previews & artwork.
+   *
+   * Results are cached in memory for CACHE_TTL_MS and concurrent callers share a
+   * single in-flight discovery, so opening the same title in several tabs (or
+   * reloading it) no longer re-runs the whole ~20-query pipeline each time.
    */
   public static async getSoundtracksForTitle(
+    titleName: string,
+    originalName?: string,
+    mediaType?: 'film' | 'tv',
+    releaseYear?: number
+  ): Promise<SoundtrackTrack[]> {
+    const cacheKey = `${cleanNormalize(titleName)}|${originalName ? cleanNormalize(originalName) : ''}|${mediaType || ''}`;
+
+    const cached = this.discoveryCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < this.CACHE_TTL_MS) {
+      return cached.tracks;
+    }
+
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) return pending;
+
+    const task = this.discoverSoundtracks(titleName, originalName, mediaType, releaseYear)
+      .then((tracks) => {
+        this.discoveryCache.set(cacheKey, { at: Date.now(), tracks });
+        return tracks;
+      })
+      .finally(() => {
+        this.inFlight.delete(cacheKey);
+      });
+
+    this.inFlight.set(cacheKey, task);
+    return task;
+  }
+
+  private static async discoverSoundtracks(
     titleName: string,
     originalName?: string,
     mediaType?: 'film' | 'tv',

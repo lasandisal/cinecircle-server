@@ -55,6 +55,9 @@ export interface ITasteProfile {
   favoriteGenres: string[];
   favoriteTitles: Types.ObjectId[];
   exclusions: string[];
+  /** Recency-weighted per-genre affinities (see RecommendationService). */
+  genreScores?: Record<string, number>;
+  tasteComputedAt?: Date;
   updatedAt: Date;
 }
 
@@ -101,6 +104,8 @@ export interface ISeasonEpisode {
       spotifyUrl?: string;
     };
   }[];
+  /** Last time this season's episode list / summaries were refreshed from TMDB. */
+  sourceUpdatedAt?: Date;
 }
 
 export interface ISoundtrack {
@@ -114,6 +119,16 @@ export interface ISoundtrack {
   albumArtUrl?: string;
   spotifyUrl?: string;
   addedBy?: Types.ObjectId;
+  /**
+   * Provenance of the track:
+   * - 'curated' seeded from the curated catalogue
+   * - 'auto'   discovered automatically by SoundtrackService (safe to replace)
+   * - 'user'   contributed by a member through the UI (never auto-deleted)
+   * Rows written before this field existed are treated as 'user' so they survive refreshes.
+   */
+  source?: 'curated' | 'auto' | 'user';
+  /** Last time this track list was (re)discovered for its title. */
+  sourceUpdatedAt?: Date;
 }
 
 export interface ISession {
@@ -175,6 +190,16 @@ export interface IComment {
   containsSpoilers?: boolean;
   reported: boolean;
   hidden: boolean;
+  /** Individual reports, so moderators can see who flagged what and why. */
+  reports?: {
+    user: Types.ObjectId;
+    reason?: string;
+    createdAt: Date;
+  }[];
+  reportCount?: number;
+  reportedAt?: Date;
+  hiddenAt?: Date;
+  hiddenBy?: Types.ObjectId;
   createdAt: Date;
 }
 

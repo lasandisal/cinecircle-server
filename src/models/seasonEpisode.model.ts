@@ -7,6 +7,9 @@ const SeasonEpisodeSchema = new Schema<ISeasonEpisodeDocument>(
   {
     title: { type: Schema.Types.ObjectId, ref: 'Title', required: true, index: true },
     seasonNumber: { type: Number, required: true },
+    // Intentionally no default: a brand-new season must be immediately eligible
+    // for its first TMDB episode sync rather than looking "fresh" for 30 minutes.
+    sourceUpdatedAt: { type: Date },
     episodes: [
       {
         episodeNumber: { type: Number, required: true },

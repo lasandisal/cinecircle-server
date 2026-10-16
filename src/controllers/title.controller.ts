@@ -15,6 +15,117 @@ import type { IAuthRequest } from '../types';
 import mongoose from 'mongoose';
 
 /**
+ * How long we trust previously fetched external data before re-checking it.
+ * Without these, every single page load re-ran TMDB + iTunes lookups because the
+ * enrichment could never be marked "done" (see isSoundtrackVerified).
+ */
+const SOUNDTRACK_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+const SEASON_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Shorter backoff for a season that still looks incomplete after a sync. TMDB
+ * publishes episode titles/overviews inconsistently (some shows have them for 4
+ * of 31 episodes), so an incomplete season is retried sooner - but not on every
+ * request, which would hammer TMDB whenever it is having a bad day.
+ */
+const SEASON_REFRESH_RETRY_MS = 30 * 60 * 1000;
+const WATCH_PROVIDER_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
+
+function isFresh(dateValue: any, ttlMs: number): boolean {
+  if (!dateValue) return false;
+  const time = new Date(dateValue).getTime();
+  return Number.isFinite(time) && Date.now() - time < ttlMs;
+}
+
+/**
+ * Escape user input before it is handed to MongoDB as a $regex.
+ * Without this, searching "C++" or "Spider-Man (2023)" makes the driver throw and
+ * the whole request 500s instead of returning results.
+ */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Detect the machine-written filler summaries this app used to persist.
+ *
+ * The enrichment step wrote "Dune: Part Two - Season 1, Episode 3" as a summary,
+ * then on the very next load treated that string as a real summary (>10 chars)
+ * and let it outrank the genuine TMDB overview - locking every episode to
+ * placeholder text permanently.
+ */
+function isGeneratedSummary(summary?: string): boolean {
+  if (!summary) return true;
+  const s = summary.trim().toLowerCase();
+  if (s.length === 0) return true;
+  return (
+    s.includes('the central narrative and character relationships deepen') ||
+    /-\s*season\s+\d+\s*,\s*episode\s+\d+\s*$/.test(s) ||
+    /^\s*episode\s+\d+\s*$/.test(s)
+  );
+}
+
+/**
+ * Flatten a flat comment list into parent comments carrying their replies.
+ *
+ * This exact grouping block was duplicated in three places; it is also where
+ * moderation state is stripped so reporters' identities never leak publicly.
+ */
+function groupCommentsForDisplay(comments: any[], viewerId?: string): any[] {
+  const parents: any[] = [];
+  const replies = new Map<string, any[]>();
+
+  const sanitise = (c: any) => {
+    const reports: any[] = c.reports || [];
+    // Strip moderation internals; expose only whether *this* viewer reported.
+    const { reports: _r, hidden: _h, hiddenBy: _hb, hiddenAt: _ha, reported: _rep, reportedAt: _ra, ...rest } = c;
+    return {
+      ...rest,
+      reportCount: reports.length,
+      reportedByMe: viewerId ? reports.some((r) => r.user?.toString() === viewerId) : false,
+    };
+  };
+
+  for (const raw of comments) {
+    const c = sanitise(raw);
+    if (c.parentId) {
+      const pid = c.parentId.toString();
+      if (!replies.has(pid)) replies.set(pid, []);
+      replies.get(pid)!.push(c);
+    } else {
+      parents.push(c);
+    }
+  }
+
+  return parents
+    .map((p) => ({ ...p, replies: replies.get(p._id.toString()) || [] }))
+    .reverse();
+}
+
+/** An episode name of "Episode 7" means we never got real TMDB data for it. */
+function isPlaceholderEpisodeName(name?: string): boolean {
+  return !name || /^episode\s*\d*$/i.test(name.trim());
+}
+
+/**
+ * Detect a partially seeded episode list.
+ *
+ * The bundled catalogue ships incomplete seasons (Stranger Things S1 contains
+ * only episodes 1, 2, 3 and 8). Because those episodes have real names, the old
+ * "is episode[0] a placeholder?" check concluded the season was complete, so
+ * episodes 4-7 - and their summaries - were never fetched from TMDB. A real
+ * season's numbering is contiguous from 1.
+ */
+function hasEpisodeGaps(episodes: any[]): boolean {
+  if (!Array.isArray(episodes) || episodes.length === 0) return true;
+  const numbers = episodes
+    .map((e: any) => Number(e?.episodeNumber))
+    .filter((n: number) => Number.isFinite(n))
+    .sort((a: number, b: number) => a - b);
+  if (numbers.length === 0) return true;
+  return numbers.some((n: number, index: number) => n !== index + 1);
+}
+
+/**
  * List titles with filtering by genre, type, streaming service, mood tag, and search
  */
 export const getTitles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -32,25 +143,26 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
     }
 
     if (genre && typeof genre === 'string') {
-      filter.genres = { $regex: new RegExp(`^${genre.trim()}$`, 'i') };
+      filter.genres = { $regex: new RegExp(`^${escapeRegex(genre.trim())}$`, 'i') };
     }
 
     if (mood && typeof mood === 'string') {
-      filter.moodTags = { $regex: new RegExp(mood.trim(), 'i') };
+      filter.moodTags = { $regex: new RegExp(escapeRegex(mood.trim()), 'i') };
     }
 
     if (search && typeof search === 'string') {
+      const safeSearch = escapeRegex(search.trim());
       filter.$or = [
-        { name: { $regex: search.trim(), $options: 'i' } },
-        { synopsis: { $regex: search.trim(), $options: 'i' } },
-        { 'cast.actorName': { $regex: search.trim(), $options: 'i' } },
+        { name: { $regex: safeSearch, $options: 'i' } },
+        { synopsis: { $regex: safeSearch, $options: 'i' } },
+        { 'cast.actorName': { $regex: safeSearch, $options: 'i' } },
       ];
     }
 
     // Filter by streaming service if requested
     if (service && typeof service === 'string') {
       const providers = await WatchProvider.find({
-        service: { $regex: new RegExp(service.trim(), 'i') },
+        service: { $regex: new RegExp(escapeRegex(service.trim()), 'i') },
       }).select('title');
 
       const titleIds = providers.map((p) => p.title);
@@ -156,7 +268,7 @@ export const searchTitles = async (req: Request, res: Response, next: NextFuncti
     }
 
     // Search local database first
-    const regex = new RegExp(q.trim(), 'i');
+    const regex = new RegExp(escapeRegex(q.trim()), 'i');
     const filter: any = {
       $or: [{ name: regex }, { genres: regex }, { moodTags: regex }],
     };
@@ -310,7 +422,7 @@ function isSoundtrackVerified(title: any, soundtracks: any[]): boolean {
 /**
  * Get full title details including watch providers, seasons/episodes, soundtracks, and comments
  */
-export const getTitleDetails = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getTitleDetails = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
     const requestedType =
@@ -407,7 +519,8 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
           WatchProvider.find({ title: titleObjId }).lean(),
           SeasonEpisode.find({ title: titleObjId }).sort({ seasonNumber: 1 }).lean(),
           Soundtrack.find({ title: titleObjId }).sort({ popularityRank: 1 }).lean(),
-          Comment.find({ title: titleObjId })
+          // Hidden comments are removed by a curator and must never be served.
+          Comment.find({ title: titleObjId, hidden: false })
             .populate('user', 'name email role')
             .sort({ createdAt: 1 })
             .lean(),
@@ -419,55 +532,67 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         ])
       : [[], [], [], [], []];
 
-    // Auto-refresh watch providers to ensure major global providers (Netflix, Prime Video, etc.) are present
+    // --- One shared TMDB fetch for both providers and seasons -------------------
+    // These used to be two separate `tmdbService.fetchDetails()` calls, each of which
+    // can hit TMDB twice (movie then tv) with an 8s timeout. One call now serves both.
     const hasBothNetflixAndPrime =
       watchProviders.some((p) => p.service.toLowerCase().includes('netflix')) &&
       watchProviders.some((p) => p.service.toLowerCase().includes('prime'));
 
-    if (title.tmdbId && (!hasBothNetflixAndPrime || watchProviders.length === 0)) {
+    const providersAreStale =
+      watchProviders.length === 0 ||
+      !watchProviders.some((p: any) => isFresh(p.sourceUpdatedAt, WATCH_PROVIDER_REFRESH_TTL_MS));
+
+    const needsProviders = title.tmdbId && (!hasBothNetflixAndPrime || providersAreStale);
+    const needsSeasons = title.type === 'tv' && title.tmdbId && seasons.length === 0;
+
+    if (needsProviders || needsSeasons) {
       try {
         const freshData = await tmdbService.fetchDetails(title.tmdbId, title.type);
-        if (freshData?.watchProviders && freshData.watchProviders.length > 0) {
+
+        if (needsProviders && freshData?.watchProviders && freshData.watchProviders.length > 0) {
           await WatchProvider.deleteMany({ title: titleObjId });
+          const now = new Date();
           const newDocs = freshData.watchProviders.map((wp) => ({
             title: titleObjId,
             service: wp.service,
             region: wp.region,
             type: wp.type,
+            sourceUpdatedAt: now,
           }));
           watchProviders = (await WatchProvider.insertMany(newDocs)) as any;
         }
-      } catch (err: any) {
-        console.warn('[getTitleDetails] Error refreshing watch providers:', err.message);
-      }
-    }
 
-    // Auto-populate seasons if missing for TV series
-    if (title.type === 'tv' && title.tmdbId && seasons.length === 0) {
-      try {
-        const freshData = await tmdbService.fetchDetails(title.tmdbId, title.type);
-        if (freshData?.seasons && freshData.seasons.length > 0) {
+        if (needsSeasons && freshData?.seasons && freshData.seasons.length > 0) {
           const seasonDocs = freshData.seasons.map((s) => ({
             title: titleObjId,
             seasonNumber: s.seasonNumber,
-            episodes: Array.from({ length: Math.min(s.episodeCount || 10, 24) }, (_, idx) => ({
-              episodeNumber: idx + 1,
-              name: `Episode ${idx + 1}`,
-              summary: `${freshData.name} - Season ${s.seasonNumber}, Episode ${idx + 1}`,
-              runtimeMinutes: freshData.runtimeMinutes || 45,
-            })),
+            episodes: [],
           }));
           await SeasonEpisode.insertMany(seasonDocs);
           seasons = await SeasonEpisode.find({ title: titleObjId }).sort({ seasonNumber: 1 }).lean();
         }
       } catch (err: any) {
-        console.warn('[getTitleDetails] Error populating TV seasons:', err.message);
+        console.warn('[getTitleDetails] Error refreshing providers/seasons:', err.message);
       }
     }
 
     // 1. Curated & dynamic soundtracks with official 30-sec legal audio previews & album artwork
     let finalSoundtracks = soundtracks;
-    const isVerified = isSoundtrackVerified(title, soundtracks);
+
+    // isSoundtrackVerified() rejects an empty list and the "{Title} Official Main
+    // Theme & Score" placeholder, which getSoundtracksForTitle() emits when it
+    // finds nothing. That combination meant discovery re-ran on *every* request
+    // forever. A recent sourceUpdatedAt now latches the result so the ~20-query
+    // pipeline only runs once per day (and is memory-cached on top of that).
+    const lastSoundtrackRefresh = soundtracks.reduce((latest: number, s: any) => {
+      const at = s.sourceUpdatedAt ? new Date(s.sourceUpdatedAt).getTime() : 0;
+      return at > latest ? at : latest;
+    }, 0);
+    const soundtracksRecentlyDiscovered =
+      lastSoundtrackRefresh > 0 && Date.now() - lastSoundtrackRefresh < SOUNDTRACK_REFRESH_TTL_MS;
+
+    const isVerified = soundtracksRecentlyDiscovered || isSoundtrackVerified(title, soundtracks);
 
     if (!isVerified) {
       try {
@@ -480,7 +605,11 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
         if (dynamicTracks.length > 0) {
           finalSoundtracks = dynamicTracks as any;
           if (titleObjId) {
-            await Soundtrack.deleteMany({ title: titleObjId });
+            // Only replace rows this service owns. Previously this was an
+            // unqualified deleteMany(), which wiped songs members had
+            // contributed through the "Suggest Song" modal.
+            await Soundtrack.deleteMany({ title: titleObjId, source: 'auto' });
+            const now = new Date();
             const docs = dynamicTracks.map((dt) => ({
               title: titleObjId,
               songName: dt.songName,
@@ -490,8 +619,15 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
               previewUrl: dt.previewUrl,
               albumArtUrl: dt.albumArtUrl,
               spotifyUrl: dt.spotifyUrl,
+              source: 'auto' as const,
+              sourceUpdatedAt: now,
             }));
-            await Soundtrack.insertMany(docs);
+            const inserted = await Soundtrack.insertMany(docs);
+            // Re-read so the response shows the merged catalogue: the newly
+            // discovered tracks *plus* curated, legacy and member-contributed
+            // rows. Returning `inserted` alone would hide those from the page.
+            const merged = await Soundtrack.find({ title: titleObjId }).sort({ popularityRank: 1 }).lean();
+            finalSoundtracks = (merged.length > 0 ? merged : inserted) as any;
           }
         }
       } catch (stErr: any) {
@@ -502,17 +638,31 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
     // 2. Auto-enrich Season 1 episodes with real TMDB data and matched iconic songs
     if (title.type === 'tv' && title.tmdbId && seasons.length > 0) {
       const firstSeason = seasons[0];
-      const hasGenericEpisodes =
-        !firstSeason.episodes ||
-        firstSeason.episodes.length === 0 ||
-        firstSeason.episodes[0]?.name.match(/^Episode \d+$/i);
-      const firstSeasonSongs = (firstSeason.episodes || []).map((e: any) => e.featuredSong).filter(Boolean);
+      const existingEpisodes = firstSeason.episodes || [];
+
+      // Only episodes[0] used to be inspected, so a partially seeded season
+      // (Stranger Things S1 shipped 4 of 8 episodes with real names) was treated
+      // as complete and the missing episodes were never backfilled.
+      const seasonLooksIncomplete =
+        existingEpisodes.length === 0 ||
+        hasEpisodeGaps(existingEpisodes) ||
+        existingEpisodes.some(
+          (e: any) => isPlaceholderEpisodeName(e.name) || isGeneratedSummary(e.summary)
+        );
+
+      // Incomplete seasons retry on a short backoff; complete ones are trusted
+      // for a week. Decided at read time so a failed sync doesn't need to store
+      // its own TTL.
+      const seasonTtl = seasonLooksIncomplete ? SEASON_REFRESH_RETRY_MS : SEASON_REFRESH_TTL_MS;
+      const seasonIsStale = !isFresh(firstSeason.sourceUpdatedAt, seasonTtl);
+      const needsEpisodeDataRefresh = seasonLooksIncomplete && seasonIsStale;
+
+      const firstSeasonSongs = existingEpisodes.map((e: any) => e.featuredSong).filter(Boolean);
       const isSeasonSongsVerified = isSoundtrackVerified(title, firstSeasonSongs);
 
       const needsSongRefresh =
         !isVerified ||
         !isSeasonSongsVerified ||
-        hasGenericEpisodes ||
         firstSeason.episodes.some(
           (e: any) =>
             !e.featuredSong ||
@@ -521,24 +671,30 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
             (!e.featuredSong.previewUrl && finalSoundtracks.some((s: any) => s.previewUrl))
         );
 
-      if (needsSongRefresh) {
+      if (needsEpisodeDataRefresh || needsSongRefresh) {
         try {
-          let baseEpisodes = firstSeason.episodes;
-          if (hasGenericEpisodes) {
+          let baseEpisodes: any[] = existingEpisodes;
+
+          if (needsEpisodeDataRefresh) {
             const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, firstSeason.seasonNumber);
             if (tmdbSeason && tmdbSeason.episodes.length > 0) {
               baseEpisodes = tmdbSeason.episodes.map((tmdbEp: any) => {
-                const existing = (firstSeason.episodes || []).find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
-                const hasExistingSummary = existing?.summary && existing.summary.trim().length > 10;
-                const hasTmdbSummary = tmdbEp.summary && tmdbEp.summary.trim().length > 10;
+                const existing = existingEpisodes.find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
+                // Generated filler must NOT outrank the genuine TMDB overview.
+                const hasExistingSummary =
+                  !!existing && !isGeneratedSummary(existing.summary) && existing.summary.trim().length > 10;
+                const hasTmdbSummary = !!tmdbEp.summary && tmdbEp.summary.trim().length > 10;
                 return {
                   ...tmdbEp,
                   summary: hasExistingSummary
                     ? existing.summary
                     : hasTmdbSummary
                       ? tmdbEp.summary
-                      : `${title.name} (Season ${firstSeason.seasonNumber}, Episode ${tmdbEp.episodeNumber}): The central narrative and character relationships deepen in this chapter as key conflicts unfold.`,
-                  name: (existing?.name && !existing.name.match(/^Episode \d+$/i)) ? existing.name : tmdbEp.name,
+                      : existing?.summary && !isGeneratedSummary(existing.summary)
+                        ? existing.summary
+                        : '',
+                  name: existing?.name && !isPlaceholderEpisodeName(existing.name) ? existing.name : tmdbEp.name,
+                  featuredSong: existing?.featuredSong,
                 };
               });
             }
@@ -556,6 +712,8 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
               );
               return {
                 ...ep,
+                // Keep whatever was already stored when nothing new matched,
+                // otherwise a no-match silently erased the episode's song.
                 featuredSong: matched
                   ? {
                       songName: matched.songName,
@@ -565,13 +723,19 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
                       albumArtUrl: matched.albumArtUrl,
                       spotifyUrl: matched.spotifyUrl,
                     }
-                  : undefined,
+                  : ep.featuredSong,
               };
             });
 
             await SeasonEpisode.updateOne(
               { _id: firstSeason._id },
-              { $set: { episodes: enriched } }
+              {
+                $set: {
+                  episodes: enriched,
+                  // Stamp the season so the TMDB episode fetch only re-runs when stale.
+                  ...(needsEpisodeDataRefresh ? { sourceUpdatedAt: new Date() } : {}),
+                },
+              }
             );
             firstSeason.episodes = enriched as any;
           }
@@ -595,12 +759,10 @@ export const getTitleDetails = async (req: Request, res: Response, next: NextFun
       }
     }
 
-    const commentsWithReplies = parentComments
-      .map((p) => ({
-        ...p,
-        replies: replyMap.get(p._id.toString()) || [],
-      }))
-      .reverse();
+    const commentsWithReplies = groupCommentsForDisplay(
+      allComments,
+      (req as IAuthRequest).user?.id
+    );
 
     const communityWatchers = (watcherDocs || [])
       .filter((w: any) => w.user != null)
@@ -661,19 +823,25 @@ export const getSeasonEpisodes = async (
 
     let seasonDoc = await SeasonEpisode.findOne({ title: title._id, seasonNumber }).lean();
 
-    const hasGeneric =
-      !seasonDoc ||
-      !seasonDoc.episodes ||
-      seasonDoc.episodes.length === 0 ||
-      seasonDoc.episodes.some((e: any) => e.name && e.name.match(/^Episode \d+$/i));
+    const existingEpisodes = seasonDoc?.episodes || [];
 
-    const seasonSongs = (seasonDoc?.episodes || []).map((e: any) => e.featuredSong).filter(Boolean);
+    // Inspect every episode, not just the first, treat machine-written filler
+    // summaries as "missing", and detect gaps so partial seeds get backfilled.
+    const seasonLooksIncomplete =
+      existingEpisodes.length === 0 ||
+      hasEpisodeGaps(existingEpisodes) ||
+      existingEpisodes.some((e: any) => isPlaceholderEpisodeName(e.name) || isGeneratedSummary(e.summary));
+
+    const seasonTtl = seasonLooksIncomplete ? SEASON_REFRESH_RETRY_MS : SEASON_REFRESH_TTL_MS;
+    const seasonIsStale = !isFresh(seasonDoc?.sourceUpdatedAt, seasonTtl);
+    const needsEpisodeDataRefresh = seasonLooksIncomplete && seasonIsStale;
+
+    const seasonSongs = existingEpisodes.map((e: any) => e.featuredSong).filter(Boolean);
     const isSeasonSongsVerified = isSoundtrackVerified(title, seasonSongs);
 
     const needsSongEnrichment =
-      hasGeneric ||
       !isSeasonSongsVerified ||
-      (seasonDoc?.episodes?.some(
+      (existingEpisodes.some(
         (e: any) =>
           !e.featuredSong ||
           e.featuredSong.songName?.includes('Theme & Suite') ||
@@ -681,39 +849,56 @@ export const getSeasonEpisodes = async (
           !e.featuredSong.previewUrl
       ) ?? false);
 
-    if (needsSongEnrichment && title.tmdbId) {
-      let baseEpisodes = seasonDoc?.episodes || [];
-      if (hasGeneric) {
+    if ((needsEpisodeDataRefresh || needsSongEnrichment) && title.tmdbId) {
+      let baseEpisodes: any[] = existingEpisodes;
+
+      if (needsEpisodeDataRefresh) {
         const tmdbSeason = await tmdbService.fetchSeasonDetails(title.tmdbId, seasonNumber);
         if (tmdbSeason && tmdbSeason.episodes.length > 0) {
           baseEpisodes = tmdbSeason.episodes.map((tmdbEp: any) => {
-            const existing = (seasonDoc?.episodes || []).find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
-            const hasExistingSummary = existing?.summary && existing.summary.trim().length > 10;
-            const hasTmdbSummary = tmdbEp.summary && tmdbEp.summary.trim().length > 10;
+            const existing = existingEpisodes.find((e: any) => e.episodeNumber === tmdbEp.episodeNumber);
+            // Generated filler must NOT outrank the genuine TMDB overview.
+            const hasExistingSummary =
+              !!existing && !isGeneratedSummary(existing.summary) && existing.summary.trim().length > 10;
+            const hasTmdbSummary = !!tmdbEp.summary && tmdbEp.summary.trim().length > 10;
             return {
               ...tmdbEp,
               summary: hasExistingSummary
                 ? existing.summary
                 : hasTmdbSummary
                   ? tmdbEp.summary
-                  : `${title.name} (Season ${seasonNumber}, Episode ${tmdbEp.episodeNumber}): The central narrative and character relationships deepen in this chapter as key conflicts unfold.`,
-              name: (existing?.name && !existing.name.match(/^Episode \d+$/i)) ? existing.name : tmdbEp.name,
+                  : existing?.summary && !isGeneratedSummary(existing.summary)
+                    ? existing.summary
+                    : '',
+              name: existing?.name && !isPlaceholderEpisodeName(existing.name) ? existing.name : tmdbEp.name,
+              featuredSong: existing?.featuredSong,
             };
           });
         }
       }
 
       if (baseEpisodes.length > 0) {
-        const songs = await SoundtrackService.getSoundtracksForTitle(
-          title.name,
-          (title as any).originalName,
-          title.type as any,
-          title.releaseYear
-        );
+        // Prefer the tracks already persisted for this title. Falling straight
+        // back to discovery here meant every season click re-ran the full
+        // Wikipedia + ~20 query iTunes pipeline.
+        let songs = await Soundtrack.find({ title: title._id }).sort({ popularityRank: 1 }).lean();
+        if (songs.length === 0) {
+          try {
+            songs = (await SoundtrackService.getSoundtracksForTitle(
+              title.name,
+              (title as any).originalName,
+              title.type as any,
+              title.releaseYear
+            )) as any;
+          } catch (err: any) {
+            console.warn('[getSeasonEpisodes] Soundtrack discovery failed:', err.message);
+          }
+        }
+
         const totalEps = baseEpisodes.length;
         const enriched = baseEpisodes.map((ep: any) => {
           const matched = SoundtrackService.matchSongForEpisode(
-            songs,
+            songs as any,
             seasonNumber,
             ep.episodeNumber,
             totalEps,
@@ -721,6 +906,7 @@ export const getSeasonEpisodes = async (
           );
           return {
             ...ep,
+            // Preserve an existing song when nothing new matches.
             featuredSong: matched
               ? {
                   songName: matched.songName,
@@ -730,13 +916,22 @@ export const getSeasonEpisodes = async (
                   albumArtUrl: matched.albumArtUrl,
                   spotifyUrl: matched.spotifyUrl,
                 }
-              : undefined,
+              : ep.featuredSong,
           };
         });
 
         seasonDoc = await SeasonEpisode.findOneAndUpdate(
           { title: title._id, seasonNumber },
-          { $set: { title: title._id, seasonNumber, episodes: enriched } },
+          {
+            $set: {
+              title: title._id,
+              seasonNumber,
+              episodes: enriched,
+              // Stamp only when a TMDB episode sync was actually attempted, so a
+              // song-only refresh cannot reset the backoff clock.
+              ...(needsEpisodeDataRefresh ? { sourceUpdatedAt: new Date() } : {}),
+            },
+          },
           { upsert: true, new: true }
         ).lean();
       }
@@ -817,33 +1012,15 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
 /**
  * Get comments for a title with nested replies
  */
-export const getComments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getComments = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
-    const allComments = await Comment.find({ title: titleId })
+    const allComments = await Comment.find({ title: titleId, hidden: false })
       .populate('user', 'name email role')
       .sort({ createdAt: 1 })
       .lean();
 
-    const parentComments: any[] = [];
-    const replyMap = new Map<string, any[]>();
-
-    for (const c of allComments) {
-      if (c.parentId) {
-        const pid = c.parentId.toString();
-        if (!replyMap.has(pid)) replyMap.set(pid, []);
-        replyMap.get(pid)!.push(c);
-      } else {
-        parentComments.push(c);
-      }
-    }
-
-    const commentsWithReplies = parentComments
-      .map((p) => ({
-        ...p,
-        replies: replyMap.get(p._id.toString()) || [],
-      }))
-      .reverse();
+    const commentsWithReplies = groupCommentsForDisplay(allComments, req.user?.id);
 
     sendSuccess(res, { comments: commentsWithReplies }, 'Comments retrieved');
   } catch (error) {
@@ -869,6 +1046,55 @@ export const likeComment = async (req: Request, res: Response, next: NextFunctio
     }
 
     sendSuccess(res, { comment }, 'Comment liked');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Report a comment for curator moderation.
+ *
+ * Previously the Comment model's `reported` / `hidden` flags had no writer at
+ * all, so nothing could ever be flagged and the moderation queue had no input.
+ */
+export const reportComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const userId = req.user?.id;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 280) : '';
+
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+      res.status(400).json({ success: false, error: 'Invalid comment id' });
+      return;
+    }
+
+    const comment = await Comment.findById(commentId);
+    if (!comment || comment.hidden) {
+      res.status(404).json({ success: false, error: 'Comment not found' });
+      return;
+    }
+
+    if (comment.user.toString() === userId) {
+      res.status(400).json({ success: false, error: 'You cannot report your own comment' });
+      return;
+    }
+
+    if ((comment.reports || []).some((r: any) => r.user.toString() === userId)) {
+      res.status(409).json({ success: false, error: 'You have already reported this comment' });
+      return;
+    }
+
+    comment.reports = [
+      ...(comment.reports || []),
+      { user: new mongoose.Types.ObjectId(userId), reason, createdAt: new Date() } as any,
+    ];
+    comment.reportCount = comment.reports.length;
+    // `reported` is the indexed flag the curator queue queries on.
+    comment.reported = true;
+    comment.reportedAt = new Date();
+    await comment.save();
+
+    sendSuccess(res, { commentId, reportCount: comment.reportCount }, 'Comment reported for review');
   } catch (error) {
     next(error);
   }
@@ -949,15 +1175,31 @@ export const voteCommentPoll = async (req: IAuthRequest, res: Response, next: Ne
 };
 
 /**
- * Search iTunes Apple Music tracks for soundtrack contributor modal
+ * Search iTunes Apple Music tracks for soundtrack contributor modal.
+ *
+ * `titleName` is optional context so results can be ranked toward the film/show
+ * the contributor is actually looking at. Upstream failures are reported as a
+ * 503 instead of being converted into an empty list, so the client can render a
+ * real error instead of an empty panel.
  */
 export const searchMusic = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const q = String(req.query.q || '');
-    const tracks = await SoundtrackService.searchItunes(q);
+    const titleName = req.query.titleName ? String(req.query.titleName) : undefined;
+
+    if (!q.trim()) {
+      sendSuccess(res, { tracks: [] }, 'No query provided');
+      return;
+    }
+
+    const tracks = await SoundtrackService.searchItunes(q, titleName);
     sendSuccess(res, { tracks }, 'Music search results retrieved');
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    console.warn('[searchMusic] Apple Music lookup failed:', error?.message);
+    res.status(503).json({
+      success: false,
+      error: 'Music search is temporarily unavailable. Please try again.',
+    });
   }
 };
 
@@ -1011,6 +1253,8 @@ export const addTitleSoundtrack = async (req: Request, res: Response, next: Next
       previewUrl: finalPreview,
       albumArtUrl: finalArt,
       spotifyUrl: finalLink,
+      // Flagged as user-owned so automatic soundtrack refreshes never delete it.
+      source: 'user',
     });
 
     sendSuccess(res, { soundtrack: created }, 'Song added to soundtrack successfully');

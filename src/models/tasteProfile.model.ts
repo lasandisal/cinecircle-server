@@ -9,6 +9,13 @@ const TasteProfileSchema = new Schema<ITasteProfileDocument>(
     favoriteGenres: { type: [String], default: [] },
     favoriteTitles: [{ type: Schema.Types.ObjectId, ref: 'Title' }],
     exclusions: { type: [String], default: [] },
+    /**
+     * Recency-weighted per-genre affinities, recomputed from WatchHistory by
+     * RecommendationService.computeRecencyWeightedTasteProfile().
+     * Persisted so the computed taste can be inspected and reused cheaply.
+     */
+    genreScores: { type: Map, of: Number, default: {} },
+    tasteComputedAt: { type: Date },
     updatedAt: { type: Date, default: Date.now },
   },
   { timestamps: false }

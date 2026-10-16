@@ -14,6 +14,8 @@ const SoundtrackSchema = new Schema<ISoundtrackDocument>(
     albumArtUrl: { type: String },
     spotifyUrl: { type: String },
     addedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    source: { type: String, enum: ['curated', 'auto', 'user'], default: 'user' },
+    sourceUpdatedAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );

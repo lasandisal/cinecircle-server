@@ -98,6 +98,9 @@ export class SeedService {
               episodeRef: st.episodeRef,
               popularityRank: st.popularityRank,
               addedBy: adminUser._id,
+              // Curated rows are owned by the catalogue, not by auto-discovery,
+              // so a refresh never deletes them.
+              source: 'curated',
             },
             { upsert: true }
           );

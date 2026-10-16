@@ -39,14 +39,18 @@ export const generateGroupCompromisePitch = async (
       return next(new AppError('winnerTitle is required to generate compromise pitch.', 400));
     }
 
-    const pitch = await AiService.generateGroupCompromisePitch({
+    const result = await AiService.generateGroupCompromisePitch({
       roomName: roomName || 'Watch Decision Room',
       winnerTitle,
       winnerSynopsis: winnerSynopsis || '',
       participants: Array.isArray(participants) ? participants : [],
     });
 
-    sendSuccess(res, { pitch }, 'Group compromise pitch generated.');
+    sendSuccess(
+      res,
+      { pitch: result.pitch, source: result.source, generatedByGemini: result.source === 'gemini' },
+      'Group compromise pitch generated.'
+    );
   } catch (error) {
     next(error);
   }
