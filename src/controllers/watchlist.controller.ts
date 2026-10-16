@@ -1,8 +1,37 @@
 import { Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { IAuthRequest } from '../types';
 import { Watchlist, WatchHistory, Title } from '../models';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
+
+/**
+ * Resolve the `:id` route parameter, which callers may supply as either a
+ * Watchlist document id or a Title id, into the Watchlist document itself.
+ *
+ * This must happen BEFORE any update. The previous implementation ran a single
+ * `findOneAndUpdate` with a `$or: [{ _id: id }, { title: id }]` filter but a
+ * hardcoded `title: id` in the update. When the caller passed a Watchlist _id
+ * (as WatchlistPage does) the matched row had its `title` overwritten with its
+ * own document id - destroying the title reference, so `.populate('title')`
+ * returned null and the entry silently vanished from GET /api/watchlist.
+ */
+async function resolveWatchlistItem(
+  userId: string,
+  id: string
+): Promise<{ _id: mongoose.Types.ObjectId; title: mongoose.Types.ObjectId } | null> {
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+
+  const byDocId = await Watchlist.findOne({ user: userId, _id: id })
+    .select('_id title')
+    .lean();
+  if (byDocId) return byDocId as any;
+
+  const byTitleId = await Watchlist.findOne({ user: userId, title: id })
+    .select('_id title')
+    .lean();
+  return byTitleId as any;
+}
 
 /**
  * Retrieve current user's real watchlist with populated titles
@@ -35,11 +64,26 @@ export const getWatchlist = async (req: IAuthRequest, res: Response, next: NextF
     // Filter out any orphaned entries where title was removed
     const validItems = items.filter((item) => item.title != null);
 
+    // Totals are computed WITHOUT the status filter. The frontend previously
+    // derived the filter-pill counts from the already-filtered list, so
+    // selecting "Watched" made "Want to Watch" read 0 and "All" show the
+    // filtered total instead of the real one.
+    const [watchedCount, wantToWatchCount] = await Promise.all([
+      Watchlist.countDocuments({ user: userId, watched: true }),
+      Watchlist.countDocuments({ user: userId, watched: false }),
+    ]);
+
     sendSuccess(
       res,
       {
-        total: validItems.length,
+        // Total is the unfiltered size of the user's list.
+        total: watchedCount + wantToWatchCount,
         watchlist: validItems,
+        counts: {
+          total: watchedCount + wantToWatchCount,
+          watched: watchedCount,
+          wantToWatch: wantToWatchCount,
+        },
       },
       'Watchlist retrieved successfully'
     );
@@ -128,21 +172,25 @@ export const markAsWatched = async (req: IAuthRequest, res: Response, next: Next
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { id } = req.params;
     const { watched = true } = req.body;
+    const id = String(req.params.id);
+
+    // Resolve first, then update by the document's own _id. `title` is never
+    // written here, so the existing reference cannot be corrupted.
+    const existing = await resolveWatchlistItem(userId, id);
+    if (!existing) {
+      return next(new AppError('Watchlist item not found', 404));
+    }
 
     const item = await Watchlist.findOneAndUpdate(
+      { _id: existing._id, user: userId },
       {
-        user: userId,
-        $or: [{ _id: id }, { title: id }],
+        $set: {
+          watched: Boolean(watched),
+          watchedAt: watched ? new Date() : null,
+        },
       },
-      {
-        user: userId,
-        title: id,
-        watched: Boolean(watched),
-        watchedAt: watched ? new Date() : null,
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { new: true }
     ).populate('title');
 
     if (!item) {
@@ -150,9 +198,11 @@ export const markAsWatched = async (req: IAuthRequest, res: Response, next: Next
     }
 
     if (watched) {
+      // `item.title` is a populated document; store the raw id.
+      const titleId = (item.title as any)?._id?.toString() || existing.title.toString();
       await WatchHistory.create({
         user: userId,
-        title: item.title,
+        title: titleId,
         action: 'watched',
         timestamp: new Date(),
       });
@@ -175,33 +225,45 @@ export const rateTitle = async (req: IAuthRequest, res: Response, next: NextFunc
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { id } = req.params;
     const { rating } = req.body;
+    const id = String(req.params.id);
 
     const numRating = Number(rating);
     if (!numRating || numRating < 1 || numRating > 5) {
       return next(new AppError('Rating must be an integer between 1 and 5', 400));
     }
 
+    // Same resolve-then-update pattern as markAsWatched: never write `title`.
+    const existing = await resolveWatchlistItem(userId, id);
+    if (!existing) {
+      return next(new AppError(
+        'This title is not in your watchlist. Add it before rating.',
+        404
+      ));
+    }
+
     const item = await Watchlist.findOneAndUpdate(
+      { _id: existing._id, user: userId },
       {
-        user: userId,
-        $or: [{ _id: id }, { title: id }],
+        $set: {
+          starRating: numRating,
+          watched: true,
+          watchedAt: new Date(),
+        },
       },
-      {
-        user: userId,
-        title: id,
-        starRating: numRating,
-        watched: true,
-        watchedAt: new Date(),
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { new: true }
     ).populate('title');
 
-    // Create a WatchHistory entry
+    if (!item) {
+      return next(new AppError('Watchlist item not found', 404));
+    }
+
+    // WatchHistory feeds the recency-weighted taste profile, so the title id
+    // must be the raw ObjectId, not a populated document.
+    const titleId = (item.title as any)?._id?.toString() || existing.title.toString();
     await WatchHistory.create({
       user: userId,
-      title: item.title,
+      title: titleId,
       action: 'rated',
       rating: numRating,
       timestamp: new Date(),

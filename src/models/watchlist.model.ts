@@ -15,4 +15,8 @@ const WatchlistSchema = new Schema<IWatchlistDocument>(
   { timestamps: false }
 );
 
+// One row per (user, title). Previously duplicates were only avoided by an
+// application-level upsert, so concurrent adds could create several rows.
+WatchlistSchema.index({ user: 1, title: 1 }, { unique: true });
+
 export const Watchlist = mongoose.model<IWatchlistDocument>('Watchlist', WatchlistSchema);
