@@ -5,39 +5,50 @@ import { SessionService, SessionServiceError } from './session.service';
 
 /**
  * Socket.IO real-time transport for CineCircle group sessions.
- *
- * Before this was rewritten the handlers did three unsafe things: they trusted a
- * client-supplied `userId`, they used the client-supplied room name verbatim as
- * the Socket.IO room, and they re-broadcast payloads without ever writing to
- * MongoDB. The result was that a socket "vote" or "lock" produced a visible
- * result that did not exist in the database.
- *
- * Now every handler delegates to SessionService - the same code path the REST
- * routes use - and emits only after the database write has succeeded.
+ * 
+ * Manages WebSocket connections, JWT authentication handshakes, 
+ * and real-time room communication for group movie selection sessions.
  */
 export class SocketService {
+  // Holds the active Socket.IO server instance globally within this class
   private static io: SocketIOServer | null = null;
 
+  /**
+   * INITIALIZATION METHOD
+   * Called from server.ts to boot up the real-time socket server.
+   */
   static initialize(io: SocketIOServer): void {
     this.io = io;
+
+    // STEP 1: Apply global authentication middleware to all incoming connections
     io.use(this.authMiddleware);
 
+    // STEP 2: Listen for successful client connection handshakes
     io.on('connection', (socket: Socket) => {
+      // Extract user info safely attached during the auth middleware step
       const user = socket.data.user;
 
+      /**
+       * EVENT: Join a group session room using a 6-character join code
+       */
       socket.on('session:join', async (payload: any, ack?: (r: any) => void) => {
         try {
           const { joinCode } = payload || {};
+
+          // Call SessionService (same logic as REST API) to join and validate in MongoDB
           const { session, alreadyPresent } = await SessionService.joinByCode(
             joinCode,
             user.id
           );
 
+          // Get the standardized room name and make the socket join it
           const room = SessionService.roomName(session._id.toString());
           await socket.join(room);
 
+          // Fetch current votes for the session
           const votes = await SessionService.getVotes(session._id.toString());
 
+          // If the user wasn't already in the room, notify other participants
           if (!alreadyPresent) {
             socket.to(room).emit('participant:joined', {
               sessionId: session._id.toString(),
@@ -45,6 +56,7 @@ export class SocketService {
             });
           }
 
+          // Send success acknowledgment back to the specific client who requested it
           ack?.({
             ok: true,
             sessionId: session._id.toString(),
@@ -52,6 +64,7 @@ export class SocketService {
             votes,
           });
         } catch (err: any) {
+          // Handle service errors gracefully and notify the client
           const message =
             err instanceof SessionServiceError ? err.message : 'Could not join that room';
           ack?.({ ok: false, error: message });
@@ -59,9 +72,14 @@ export class SocketService {
         }
       });
 
+      /**
+       * EVENT: Cast or update a movie vote in real-time
+       */
       socket.on('vote:cast', async (payload: any, ack?: (r: any) => void) => {
         try {
           const { sessionId, titleId, reaction, strength } = payload || {};
+
+          // Process the vote through the database session service first
           const result = await SessionService.castVote({
             sessionId,
             userId: user.id,
@@ -70,6 +88,7 @@ export class SocketService {
             strength,
           });
 
+          // Broadcast the updated votes to EVERYONE in the session room instantly
           this.emitToSession(sessionId, 'vote:updated', {
             sessionId,
             votes: result.votes,
@@ -85,11 +104,15 @@ export class SocketService {
         }
       });
 
+      /**
+       * EVENT: Finalize/lock the session decision (choose the winning movie)
+       */
       socket.on('session:lock', async (payload: any, ack?: (r: any) => void) => {
         try {
           const { sessionId } = payload || {};
           const result = await SessionService.finalize(sessionId, user.id);
 
+          // Broadcast the finalized session result and AI pitch to all room members
           this.emitToSession(sessionId, 'session:finalized', result);
 
           ack?.({ ok: true, winnerId: result.winnerId, aiPitch: result.aiPitch });
@@ -101,12 +124,18 @@ export class SocketService {
         }
       });
 
+      /**
+       * EVENT: Leave a session room manually
+       */
       socket.on('session:leave', async (payload: any) => {
         const { sessionId } = payload || {};
         if (!sessionId) return;
         await socket.leave(SessionService.roomName(sessionId));
       });
 
+      /**
+       * EVENT: Client disconnects from the socket server
+       */
       socket.on('disconnect', (reason: string) => {
         console.log(`[Socket] user ${user?.id} disconnected (${reason})`);
       });
@@ -116,35 +145,46 @@ export class SocketService {
   }
 
   /**
-   * Verify the JWT supplied on the handshake. Unauthenticated sockets are
-   * rejected outright, so a client can no longer join or write to any room
-   * simply by guessing a six-character code.
+   * AUTHENTICATION MIDDLEWARE
+   * Intercepts incoming socket connections to verify the JWT token 
+   * passed in auth headers or query strings.
    */
   private static authMiddleware(socket: Socket, next: (err?: Error) => void): void {
     const token =
       socket.handshake.auth?.token ||
       (typeof socket.handshake.query?.token === 'string' ? socket.handshake.query.token : undefined);
 
+    // Reject connection if no token is provided
     if (!token) {
       return next(new Error('Authentication required'));
     }
 
     try {
+      // Verify token authenticity and expiration
       const decoded = jwt.verify(String(token), ENV.JWT_SECRET) as any;
+
+      // Attach user details directly to the socket instance for later use
       socket.data.user = { id: decoded.id, role: decoded.role, email: decoded.email };
       socket.data.name = decoded.email;
-      return next();
+
+      return next(); // Allow connection to proceed
     } catch {
-      return next(new Error('Invalid or expired token'));
+      return next(new Error('Invalid or expired token')); // Reject connection
     }
   }
 
-  /** Broadcast to a session room. Safe to call before initialisation. */
+  /**
+   * HELPER: Broadcast messages to all clients inside a specific session room.
+   * Safe to call from anywhere in the application.
+   */
   static emitToSession(sessionId: string, event: string, payload: any): void {
     if (!this.io) return;
     this.io.to(SessionService.roomName(sessionId)).emit(event, payload);
   }
 
+  /**
+   * HELPER: Retrieve the raw IO server instance. Throws an error if uninitialized.
+   */
   static getIO(): SocketIOServer {
     if (!this.io) {
       throw new Error('Socket.IO not initialized');
