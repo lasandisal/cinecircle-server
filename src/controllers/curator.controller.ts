@@ -1,20 +1,14 @@
 import { Response, NextFunction } from 'express';
 import { IAuthRequest } from '../types';
 import { sendSuccess } from '../utils/response';
-import { Title } from '../models/title.model';
-import { Comment } from '../models/comment.model';
-import { Soundtrack } from '../models/soundtrack.model';
-import { SeasonEpisode } from '../models/seasonEpisode.model';
+import prisma from '../config/prisma';
 import { SoundtrackService } from '../services/SoundtrackService';
 import { AppError } from '../middleware/error.middleware';
-import mongoose from 'mongoose';
 import axios from 'axios';
 import { ENV } from '../config/env';
 
 /**
- * Add curated soundtrack moments (supports single track or batch tracks from Tasklet.ai agent)
- * Automatically enriches each song with legal 30s audio previews & artwork via Apple CDN,
- * saves to MongoDB, and updates relevant season episodes.
+ * Add curated soundtrack moments
  */
 export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -24,14 +18,13 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
       return next(new AppError('titleName or tmdbId is required', 400));
     }
 
-    // 1. Resolve or create Title in MongoDB
-    let titleDoc = await Title.findOne(
-      tmdbId
+    // 1. Resolve or create Title in PostgreSQL
+    let titleDoc = await prisma.title.findFirst({
+      where: tmdbId
         ? { tmdbId: Number(tmdbId) }
-        : { name: new RegExp(`^${titleName.trim()}$`, 'i') }
-    );
+        : { name: { equals: titleName.trim(), mode: 'insensitive' } },
+    });
 
-    // If not in DB, search TMDB to auto-initialize
     if (!titleDoc && ENV.TMDB_API_KEY) {
       try {
         const searchType = mediaType === 'film' || mediaType === 'movie' ? 'movie' : 'tv';
@@ -41,16 +34,22 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
         });
         const hit = tmdbRes.data?.results?.[0];
         if (hit) {
-          titleDoc = await Title.create({
-            tmdbId: hit.id,
-            name: hit.title || hit.name,
-            originalName: hit.original_title || hit.original_name,
-            type: searchType === 'movie' ? 'film' : 'tv',
-            synopsis: hit.overview || '',
-            posterUrl: hit.poster_path ? `https://image.tmdb.org/t/p/w500${hit.poster_path}` : '',
-            backdropUrl: hit.backdrop_path ? `https://image.tmdb.org/t/p/original${hit.backdrop_path}` : '',
-            releaseYear: hit.release_date ? parseInt(hit.release_date.split('-')[0], 10) : (hit.first_air_date ? parseInt(hit.first_air_date.split('-')[0], 10) : undefined),
-            voteAverage: hit.vote_average || 0,
+          titleDoc = await prisma.title.create({
+            data: {
+              tmdbId: hit.id,
+              name: hit.title || hit.name,
+              originalName: hit.original_title || hit.original_name,
+              type: searchType === 'movie' ? 'movie' : 'tv',
+              synopsis: hit.overview || '',
+              posterUrl: hit.poster_path ? `https://image.tmdb.org/t/p/w500${hit.poster_path}` : '',
+              backdropUrl: hit.backdrop_path ? `https://image.tmdb.org/t/p/original${hit.backdrop_path}` : '',
+              releaseYear: hit.release_date
+                ? parseInt(hit.release_date.split('-')[0], 10)
+                : hit.first_air_date
+                  ? parseInt(hit.first_air_date.split('-')[0], 10)
+                  : null,
+              voteAverage: hit.vote_average || 0,
+            },
           });
         }
       } catch (err: any) {
@@ -62,7 +61,6 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
       return next(new AppError(`Title "${titleName || tmdbId}" could not be found or initialized.`, 404));
     }
 
-    // 2. Normalize input tracks (single track vs batch array)
     const rawList = Array.isArray(tracks) && tracks.length > 0
       ? tracks
       : songName && artist
@@ -83,50 +81,58 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
       const cleanArtist = item.artist.trim();
       const cleanEpisodeRef = item.episodeRef || (item.sceneDescription ? `Scene: ${item.sceneDescription}` : 'Curated Iconic Moment');
 
-      // Check if track already exists for this title
-      const existing = await Soundtrack.findOne({
-        title: titleDoc._id,
-        songName: new RegExp(`^${cleanSong.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i'),
+      const existing = await prisma.soundtrack.findFirst({
+        where: {
+          titleId: titleDoc.id,
+          songName: { equals: cleanSong, mode: 'insensitive' },
+        },
       });
 
       if (existing) {
         if (cleanEpisodeRef && existing.episodeRef !== cleanEpisodeRef) {
-          existing.episodeRef = cleanEpisodeRef;
-          await existing.save();
+          const updated = await prisma.soundtrack.update({
+            where: { id: existing.id },
+            data: { episodeRef: cleanEpisodeRef },
+          });
+          savedTracks.push({ ...updated, _id: updated.id });
+        } else {
+          savedTracks.push({ ...existing, _id: existing.id });
         }
-        savedTracks.push(existing);
         continue;
       }
 
-      // Automatically enrich with legal 30s preview and high-res cover art from Apple CDN
       const audio = await SoundtrackService.enrichTrackWithAudio(cleanSong, cleanArtist);
 
-      const created = await Soundtrack.create({
-        title: titleDoc._id,
-        songName: cleanSong,
-        artist: cleanArtist,
-        episodeRef: cleanEpisodeRef,
-        popularityRank: item.popularityRank || i + 1,
-        previewUrl: audio.previewUrl || item.previewUrl,
-        albumArtUrl: audio.albumArtUrl || item.albumArtUrl,
-        spotifyUrl: audio.appleMusicUrl || item.spotifyUrl,
+      const created = await prisma.soundtrack.create({
+        data: {
+          titleId: titleDoc.id,
+          songName: cleanSong,
+          artist: cleanArtist,
+          episodeRef: cleanEpisodeRef,
+          popularityRank: item.popularityRank || i + 1,
+          previewUrl: audio.previewUrl || item.previewUrl,
+          albumArtUrl: audio.albumArtUrl || item.albumArtUrl,
+          spotifyUrl: audio.appleMusicUrl || item.spotifyUrl,
+        },
       });
 
-      savedTracks.push(created);
+      savedTracks.push({ ...created, _id: created.id });
     }
 
-    // 3. Auto-link to season episodes if matching
+    // Auto-link to season episodes if matching
     try {
-      const seasons = await SeasonEpisode.find({ title: titleDoc._id });
+      const seasons = await prisma.seasonEpisode.findMany({ where: { titleId: titleDoc.id } });
       for (const season of seasons) {
+        const episodes = Array.isArray(season.episodes) ? (season.episodes as any[]) : [];
         let seasonUpdated = false;
-        for (const ep of season.episodes) {
+
+        for (const ep of episodes) {
           if (!ep.featuredSong || !ep.featuredSong.previewUrl) {
             const matched = SoundtrackService.matchSongForEpisode(
               savedTracks,
               season.seasonNumber,
               ep.episodeNumber,
-              season.episodes.length,
+              episodes.length,
               ep.name
             );
             if (matched) {
@@ -142,8 +148,12 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
             }
           }
         }
+
         if (seasonUpdated) {
-          await season.save();
+          await prisma.seasonEpisode.update({
+            where: { id: season.id },
+            data: { episodes },
+          });
         }
       }
     } catch (epErr: any) {
@@ -153,7 +163,8 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
     sendSuccess(
       res,
       {
-        titleId: titleDoc._id,
+        titleId: titleDoc.id,
+        _id: titleDoc.id,
         titleName: titleDoc.name,
         tmdbId: titleDoc.tmdbId,
         count: savedTracks.length,
@@ -168,7 +179,7 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
 };
 
 /**
- * Batch update episode synopses, titles, or stills (via Tasklet.ai agent or Admin Curator)
+ * Batch update episode synopses, titles, or stills
  */
 export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -178,16 +189,20 @@ export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, ne
       return next(new AppError('titleName or tmdbId is required', 400));
     }
 
-    const titleDoc = await Title.findOne(
-      tmdbId ? { tmdbId: Number(tmdbId) } : { name: new RegExp(`^${titleName.trim()}$`, 'i') }
-    );
+    const titleDoc = await prisma.title.findFirst({
+      where: tmdbId
+        ? { tmdbId: Number(tmdbId) }
+        : { name: { equals: titleName.trim(), mode: 'insensitive' } },
+    });
 
     if (!titleDoc) {
-      return next(new AppError('Title not found in MongoDB', 404));
+      return next(new AppError('Title not found in PostgreSQL', 404));
     }
 
     const sNum = Number(seasonNumber) || 1;
-    const seasonDoc = await SeasonEpisode.findOne({ title: titleDoc._id, seasonNumber: sNum });
+    const seasonDoc = await prisma.seasonEpisode.findFirst({
+      where: { titleId: titleDoc.id, seasonNumber: sNum },
+    });
 
     if (!seasonDoc) {
       return next(new AppError(`Season ${sNum} not found for title "${titleDoc.name}"`, 404));
@@ -197,12 +212,14 @@ export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, ne
       return next(new AppError('episodes array is required', 400));
     }
 
+    const existingEpisodes: any[] = Array.isArray(seasonDoc.episodes) ? (seasonDoc.episodes as any[]) : [];
     let updatedCount = 0;
+
     for (const item of episodes) {
       const epNum = Number(item.episodeNumber);
       if (!epNum) continue;
 
-      const ep = seasonDoc.episodes.find((e) => e.episodeNumber === epNum);
+      const ep = existingEpisodes.find((e) => e.episodeNumber === epNum);
       if (ep) {
         if (item.summary) ep.summary = item.summary.trim();
         if (item.name && (!ep.name || ep.name.match(/^Episode \d+$/i))) ep.name = item.name.trim();
@@ -211,7 +228,10 @@ export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, ne
       }
     }
 
-    await seasonDoc.save();
+    await prisma.seasonEpisode.update({
+      where: { id: seasonDoc.id },
+      data: { episodes: existingEpisodes },
+    });
 
     sendSuccess(
       res,
@@ -229,33 +249,41 @@ export const updateCuratedEpisodes = async (req: IAuthRequest, res: Response, ne
 };
 
 /**
- * Moderation queue: every comment that at least one member has reported.
- *
- * Was a stub returning `{ reportedComments: [] }`, which meant the moderation
- * queue could never display anything.
+ * Moderation queue: reported comments
  */
 export const getFlaggedComments = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const status = req.query.status === 'resolved' ? 'resolved' : 'open';
 
-    const filter: any =
+    const where: any =
       status === 'open'
         ? { reported: true, hidden: false }
-        : { $or: [{ hidden: true }, { reported: false, reportCount: { $gt: 0 } }] };
+        : { OR: [{ hidden: true }, { reported: false, reportCount: { gt: 0 } }] };
 
-    const comments = await Comment.find(filter)
-      .populate('user', 'name email avatar handle')
-      .populate('title', 'name posterUrl releaseYear type')
-      .populate('reports.user', 'name handle avatar')
-      .sort({ reportCount: -1, reportedAt: -1 })
-      .limit(100)
-      .lean();
+    const comments = await prisma.comment.findMany({
+      where,
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true, handle: true } },
+        title: { select: { id: true, name: true, posterUrl: true, releaseYear: true, type: true } },
+      },
+      orderBy: [{ reportCount: 'desc' }, { reportedAt: 'desc' }],
+      take: 100,
+    });
+
+    const openCount = await prisma.comment.count({
+      where: { reported: true, hidden: false },
+    });
 
     sendSuccess(
       res,
       {
-        reportedComments: comments,
-        openCount: await Comment.countDocuments({ reported: true, hidden: false }),
+        reportedComments: comments.map((c) => ({
+          ...c,
+          _id: c.id,
+          user: c.user ? { ...c.user, _id: c.user.id } : null,
+          title: c.title ? { ...c.title, _id: c.title.id } : null,
+        })),
+        openCount,
       },
       'Flagged comments retrieved'
     );
@@ -265,10 +293,7 @@ export const getFlaggedComments = async (req: IAuthRequest, res: Response, next:
 };
 
 /**
- * Apply a moderation decision to a flagged comment.
- *
- * action = 'hide'    -> remove from all public reads, keep for audit
- * action = 'dismiss' -> clear the report flags, leave the comment visible
+ * Apply moderation decision to a flagged comment
  */
 export const moderateComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -276,48 +301,49 @@ export const moderateComment = async (req: IAuthRequest, res: Response, next: Ne
     const action = String(req.body?.action || '').toLowerCase();
     const moderatorId = req.user?.id;
 
-    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+    if (!commentId) {
       return next(new AppError('Invalid comment id', 400));
     }
     if (action !== 'hide' && action !== 'dismiss') {
       return next(new AppError("action must be either 'hide' or 'dismiss'", 400));
     }
 
-    const comment = await Comment.findById(commentId);
+    const comment = await prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment) {
       return next(new AppError('Comment not found', 404));
     }
 
+    const data: any = {};
     if (action === 'hide') {
-      comment.hidden = true;
-      comment.hiddenAt = new Date();
-      comment.hiddenBy = new mongoose.Types.ObjectId(moderatorId);
+      data.hidden = true;
+      data.hiddenAt = new Date();
+      data.hiddenBy = moderatorId;
     } else {
-      comment.reported = false;
-      comment.reports = [];
-      comment.reportCount = 0;
-      comment.reportedAt = undefined;
+      data.reported = false;
+      data.reports = [];
+      data.reportCount = 0;
+      data.reportedAt = null;
     }
 
-    await comment.save();
-
-    const populated = await Comment.findById(comment._id)
-      .populate('user', 'name email avatar handle')
-      .populate('title', 'name posterUrl releaseYear type');
-
-    if (!populated) {
-      return next(new AppError('Comment not found after update', 404));
-    }
+    const updated = await prisma.comment.update({
+      where: { id: commentId },
+      data,
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true, handle: true } },
+        title: { select: { id: true, name: true, posterUrl: true, releaseYear: true, type: true } },
+      },
+    });
 
     sendSuccess(
       res,
       {
         comment: {
-          _id: populated._id,
-          text: populated.text,
-          hidden: populated.hidden,
-          reported: populated.reported,
-          reportCount: populated.reportCount,
+          _id: updated.id,
+          id: updated.id,
+          text: updated.text,
+          hidden: updated.hidden,
+          reported: updated.reported,
+          reportCount: updated.reportCount,
         },
         action,
       },

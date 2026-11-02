@@ -1,4 +1,4 @@
-import { TasteProfile, Watchlist } from '../models';
+import prisma from '../config/prisma';
 
 export interface CompatibilityInput {
   /** Recency-weighted genre affinities, when already computed. */
@@ -32,34 +32,29 @@ function jaccard(a: string[], b: string[]): { value: number; shared: string[] } 
 }
 
 /**
- * Real compatibility between two members.
- *
- * Replaces fabricated scores that were previously produced by index
- * arithmetic (`82 + ((idx * 6) % 17)`), which meant the number changed when
- * list order changed and had no relationship to the two people at all.
- *
- * Signal used:
- *   - taste overlap   : Jaccard similarity of favourite genres + weighted genre scores
- *   - behaviour overlap: how many titles they have both watched
- *
- * Returns `score: null` when there is no shared signal at all, so the UI can
- * say "not enough shared history" instead of inventing a flattering number.
+ * Real compatibility between two members based on taste and watched films.
  */
 export class CompatibilityService {
   /** Titles both people have watched. */
   static async mutualWatchedCount(userAId: string, userBId: string): Promise<number> {
-    const watchedA = await Watchlist.find({ user: userAId, watched: true }).distinct('title');
+    const watchedAItems = await prisma.watchlist.findMany({
+      where: { userId: userAId, watched: true },
+      select: { titleId: true },
+    });
+    const watchedA = Array.from(new Set(watchedAItems.map((w) => w.titleId)));
     if (watchedA.length === 0) return 0;
-    return Watchlist.countDocuments({
-      user: userBId,
-      watched: true,
-      title: { $in: watchedA },
+
+    return prisma.watchlist.count({
+      where: {
+        userId: userBId,
+        watched: true,
+        titleId: { in: watchedA },
+      },
     });
   }
 
   /**
    * Compute compatibility for a viewer against a target user.
-   * `viewerId` may be undefined (guest) - guests get no score.
    */
   static async compute(
     targetUserId: string,
@@ -76,8 +71,8 @@ export class CompatibilityService {
     }
 
     const [targetProfile, viewerProfile] = await Promise.all([
-      TasteProfile.findOne({ user: targetUserId }).lean(),
-      TasteProfile.findOne({ user: viewerId }).lean(),
+      prisma.tasteProfile.findUnique({ where: { userId: targetUserId } }),
+      prisma.tasteProfile.findUnique({ where: { userId: viewerId } }),
     ]);
 
     const targetGenres = normaliseGenreScores(targetProfile);
@@ -117,8 +112,6 @@ export class CompatibilityService {
       parts.push(`${mutualWatchedCount} film${mutualWatchedCount === 1 ? '' : 's'} watched in common`);
     }
 
-    // A genuine 0% reads as a verdict on someone. When there simply is no
-    // overlap to measure, say so instead of scoring them as incompatible.
     if (parts.length === 0) {
       return {
         score: null,
@@ -141,8 +134,7 @@ export class CompatibilityService {
   }
 
   /**
-   * Batch version for suggestion/search lists, to avoid an N+1 in the caller.
-   * Returns a Map keyed by candidate user id.
+   * Batch version for suggestion/search lists
    */
   static async computeBatch(
     viewerId: string | undefined,
@@ -151,24 +143,35 @@ export class CompatibilityService {
     const out = new Map<string, CompatibilityResult>();
     if (!viewerId || candidateIds.length === 0) return out;
 
-    const profiles = await TasteProfile.find({ user: { $in: candidateIds } }).lean();
-    const profileByUser = new Map(
-      profiles.map((p: any) => [p.user.toString(), p] as const)
-    );
-    const viewerProfile = await TasteProfile.findOne({ user: viewerId }).lean();
+    const [profiles, viewerProfile, viewerWatchedItems] = await Promise.all([
+      prisma.tasteProfile.findMany({ where: { userId: { in: candidateIds } } }),
+      prisma.tasteProfile.findUnique({ where: { userId: viewerId } }),
+      prisma.watchlist.findMany({
+        where: { userId: viewerId, watched: true },
+        select: { titleId: true },
+      }),
+    ]);
+
+    const profileByUser = new Map(profiles.map((p) => [p.userId, p]));
     const viewerGenres = normaliseGenreScores(viewerProfile);
+    const viewerWatched = viewerWatchedItems.map((w) => w.titleId);
 
-    const viewerWatched = await Watchlist.find({ user: viewerId, watched: true })
-      .distinct('title');
-
-    // One query for everyone's shared titles.
     const sharedCounts = new Map<string, number>();
     if (viewerWatched.length > 0) {
-      const rows = await Watchlist.aggregate([
-        { $match: { user: { $in: candidateIds }, watched: true, title: { $in: viewerWatched } } },
-        { $group: { _id: '$user', count: { $sum: 1 } } },
-      ]);
-      for (const r of rows) sharedCounts.set(r._id.toString(), r.count);
+      const rows = await prisma.watchlist.groupBy({
+        by: ['userId'],
+        where: {
+          userId: { in: candidateIds },
+          watched: true,
+          titleId: { in: viewerWatched },
+        },
+        _count: {
+          titleId: true,
+        },
+      });
+      for (const r of rows) {
+        sharedCounts.set(r.userId, r._count.titleId);
+      }
     }
 
     for (const id of candidateIds) {
@@ -209,7 +212,6 @@ export class CompatibilityService {
         parts.push(`${mutualWatchedCount} watched in common`);
       }
 
-      // No measurable overlap is "unknown", not "0% incompatible".
       if (parts.length === 0) {
         out.set(id, {
           score: null,
@@ -240,11 +242,7 @@ function normaliseGenreScores(profile: any): string[] {
   const favourites: string[] = Array.isArray(profile.favoriteGenres) ? profile.favoriteGenres : [];
   const raw = profile.genreScores;
   let computed: string[] = [];
-  if (raw instanceof Map) {
-    computed = Array.from(raw.entries())
-      .filter(([, v]) => Number(v) > 0)
-      .map(([k]) => k);
-  } else if (raw && typeof raw === 'object') {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     computed = Object.entries(raw)
       .filter(([, v]) => Number(v) > 0)
       .map(([k]) => k);

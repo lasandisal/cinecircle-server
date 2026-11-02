@@ -3,7 +3,6 @@ import cors from 'cors';
 import apiRouter from './routes';
 import { errorHandler } from './middleware/error.middleware';
 import { ENV } from './config/env';
-import { connectDB } from './config/db';
 
 // Create the Express application instance
 const app: Application = express();
@@ -32,16 +31,6 @@ export const isAllowedOrigin = (origin: string | undefined): boolean => {
  * ==========================================
  * Setup security, cross-origin resource sharing, and body parsers.
  */
-
-// Ensure MongoDB is connected before handling requests
-app.use(async (_req, _res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    next(err);
-  }
-});
 
 /**
  * Enable CORS with credentials support for frontend client URLs

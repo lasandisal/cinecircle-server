@@ -2,7 +2,7 @@ import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import app, { isAllowedOrigin } from './app';
 import { ENV } from './config/env';
-import { connectDB } from './config/db';
+import prisma from './config/prisma';
 import { SocketService } from './services/socket.service';
 import { SeedService } from './services/SeedService';
 
@@ -39,7 +39,7 @@ let isInitialized = false;
 export const initServer = async (): Promise<void> => {
   if (isInitialized) return;
   isInitialized = true;
-  await connectDB();
+  await prisma.$connect();
   await SeedService.autoSeedIfEmpty();
 };
 

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { Title, TasteProfile, User, WatchProvider } from '../models';
+import prisma from '../config/prisma';
 import { sendSuccess } from '../utils/response';
 import { AiService } from '../services/ai.service';
 import { RecommendationService } from '../services/recommendation.service';
@@ -25,31 +25,28 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
     let targetGenres: string[] = MOOD_GENRES[mood as string] || ['Drama', 'Thriller'];
     let maxRuntime = Number(duration) || 90;
     let rationalePrefix = `Selected for your "${mood}" mood`;
-    // Provenance of the rationale shown on each card, so a template is never
-    // presented as something Gemini wrote.
     let rationaleSource: 'gemini' | 'fallback' | 'none' = 'none';
     let userExclusions: string[] = [];
     let userSubscribedServices: string[] = [];
 
     const userId = req.user?.id;
 
-    // Recency-weighted taste. Derived from WatchHistory, which until now was
-    // written but never read by anything.
     const taste = await RecommendationService.getTasteContext(userId);
     userExclusions = taste.exclusions;
     userSubscribedServices = taste.subscribedServices;
 
     let fatigueActive = false;
     if (userId) {
-      const userDoc = await User.findById(userId).select('fatigueCount').lean();
+      const userDoc = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { fatigueCount: true },
+      });
       fatigueActive = RecommendationService.isFatigued(userDoc?.fatigueCount);
-      // Decision fatigue narrows the window, favouring shorter titles.
       if (fatigueActive) {
         maxRuntime = Math.min(maxRuntime, 100);
       }
     }
 
-    // If natural language vibe prompt is provided, use Gemini AI to interpret
     if (aiPrompt && typeof aiPrompt === 'string' && aiPrompt.trim()) {
       try {
         const parsed = await AiService.parseVibePrompt(aiPrompt.trim());
@@ -64,63 +61,52 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
         }
         rationaleSource = parsed.source;
       } catch (e) {
-        // Fallback to keyword matching if AI rate limited
+        // Fallback
       }
     }
 
-    // Fold declared favourite genres into the mood's genre set.
     if (taste.favoriteGenres.length > 0) {
       targetGenres = Array.from(new Set([...targetGenres, ...taste.favoriteGenres]));
     }
 
-    // Query titles from database
-    const query: any = {};
+    const where: any = {};
     if (type === 'film' || type === 'tv') {
-      query.type = type;
+      where.type = type;
     }
 
-    // Pre-filter on runtime so the scored pool stays bounded. Titles with no
-    // runtime are kept (runtimeFit scores them neutral rather than perfect).
     if (maxRuntime && maxRuntime > 0) {
-      query.$or = [
-        { runtimeMinutes: { $lte: maxRuntime } },
-        { runtimeMinutes: { $exists: false } },
+      where.OR = [
+        { runtimeMinutes: { lte: maxRuntime } },
+        { runtimeMinutes: null },
         { runtimeMinutes: 0 },
       ];
     }
 
-    // Sorted pool: the previous query was `.limit(60)` with no sort, so which
-    // 60 titles were considered was effectively arbitrary.
-    const candidateTitles = await Title.find(query)
-      .sort({ voteAverage: -1, releaseYear: -1 })
-      .limit(fatigueActive ? 40 : 80)
-      .lean();
-    const candidateIds = candidateTitles.map((t) => t._id);
+    const candidateTitles = await prisma.title.findMany({
+      where,
+      orderBy: [{ voteAverage: 'desc' }, { releaseYear: 'desc' }],
+      take: fatigueActive ? 40 : 80,
+    });
+    const candidateIds = candidateTitles.map((t) => t.id);
 
-    // Fetch watch providers for candidates
-    const providers = await WatchProvider.find({ title: { $in: candidateIds } }).lean();
+    const providers = await prisma.watchProvider.findMany({
+      where: { titleId: { in: candidateIds } },
+    });
     const providerMap = new Map<string, string[]>();
     for (const p of providers) {
-      const key = p.title.toString();
+      const key = p.titleId;
       if (!providerMap.has(key)) providerMap.set(key, []);
       if (!providerMap.get(key)!.includes(p.service)) {
         providerMap.get(key)!.push(p.service);
       }
     }
 
-    // Score each candidate with the documented weighted formula.
     const scored: any[] = [];
 
     for (const t of candidateTitles) {
-      // Hard exclusions (exact genre match) - handled by the service so the
-      // rule lives in one place.
       if (RecommendationService.matchesHardExclusion(t, userExclusions)) continue;
 
-      // NOTE: no fabricated fallback list here. The previous code defaulted to
-      // ['Netflix','Prime Video'] for any title with no WatchProvider rows,
-      // which handed subscribers a free "ready to stream" boost that was not
-      // real and was also shown to the user as genuine availability.
-      const availableServices = providerMap.get(t._id.toString()) || [];
+      const availableServices = providerMap.get(t.id) || [];
 
       const { score: matchScore, breakdown } = RecommendationService.scoreSoloCandidate(
         t,
@@ -141,7 +127,8 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
       if (breakdown.ownedServiceBonus > 0) reasons.push('On a service you subscribe to');
 
       scored.push({
-        id: t._id.toString(),
+        id: t.id,
+        _id: t.id,
         tmdbId: t.tmdbId,
         name: t.name,
         type: t.type,
@@ -169,7 +156,6 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
 
     scored.sort((a, b) => b.matchScore - a.matchScore);
 
-    // Decision fatigue deliberately shrinks the shortlist.
     const shortlist = scored.slice(0, fatigueActive ? 3 : 6);
 
     sendSuccess(
@@ -188,33 +174,28 @@ export const getSoloRecommendation = async (req: IAuthRequest, res: Response, ne
 /**
  * Break decision fatigue by collapsing the shortlist to one definitive pick.
  * POST /api/recommendations/fatigue
- *
- * Previously returned a hardcoded `fatigueCount: 1`, never wrote anything, and
- * ignored `User.fatigueCount` entirely - so the counter could only ever be 0.
  */
 export const handleDecisionFatigue = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
 
-    // Pick the best-scoring title the user can actually finish, honouring their
-    // exclusions, services and a hard 90-minute ceiling.
     const taste = await RecommendationService.getTasteContext(userId);
 
-    const candidates = await Title.find({
-      runtimeMinutes: { $gte: 1, $lte: 90 },
-      ...(taste.exclusions.length > 0
-        ? { genres: { $nin: taste.exclusions.map((e) => new RegExp(`^${escapeRegex(String(e))}$`, 'i')) } }
-        : {}),
-    })
-      .sort({ voteAverage: -1 })
-      .limit(80)
-      .lean();
+    const candidates = await prisma.title.findMany({
+      where: {
+        runtimeMinutes: { gte: 1, lte: 90 },
+      },
+      orderBy: { voteAverage: 'desc' },
+      take: 80,
+    });
 
-    const candidateIds = candidates.map((c) => c._id);
-    const providers = await WatchProvider.find({ title: { $in: candidateIds } }).lean();
+    const candidateIds = candidates.map((c) => c.id);
+    const providers = await prisma.watchProvider.findMany({
+      where: { titleId: { in: candidateIds } },
+    });
     const providerMap = new Map<string, string[]>();
     for (const p of providers) {
-      const key = p.title.toString();
+      const key = p.titleId;
       if (!providerMap.has(key)) providerMap.set(key, []);
       if (!providerMap.get(key)!.includes(p.service)) providerMap.get(key)!.push(p.service);
     }
@@ -222,13 +203,15 @@ export const handleDecisionFatigue = async (req: IAuthRequest, res: Response, ne
     let champion: any = null;
     let championScore = -1;
     for (const t of candidates) {
+      if (RecommendationService.matchesHardExclusion(t, taste.exclusions)) continue;
+
       const { score } = RecommendationService.scoreSoloCandidate(
         t,
         {
           genreScores: taste.genreScores,
           favoriteGenres: taste.favoriteGenres,
           subscribedServices: taste.subscribedServices,
-          availableServices: providerMap.get(t._id.toString()) || [],
+          availableServices: providerMap.get(t.id) || [],
         },
         'Comfort',
         90
@@ -239,16 +222,17 @@ export const handleDecisionFatigue = async (req: IAuthRequest, res: Response, ne
       }
     }
 
-    // Actually record the fatigue event against the signed-in user.
-    const fatigueCount = await RecommendationService.recordDecisionFatigue(userId as string);
+    const fatigueCount = userId
+      ? await RecommendationService.recordDecisionFatigue(userId)
+      : 1;
 
     sendSuccess(
       res,
       {
         championPick: champion
           ? {
-              id: champion._id.toString(),
-              _id: champion._id,
+              id: champion.id,
+              _id: champion.id,
               tmdbId: champion.tmdbId,
               name: champion.name,
               type: champion.type,
@@ -260,10 +244,9 @@ export const handleDecisionFatigue = async (req: IAuthRequest, res: Response, ne
               runtimeMinutes: champion.runtimeMinutes,
               voteAverage: champion.voteAverage,
               matchScore: championScore,
-              streamingServices: (providerMap.get(champion._id.toString()) || []).slice(0, 4),
+              streamingServices: (providerMap.get(champion.id) || []).slice(0, 4),
             }
           : null,
-        // Real, persisted counter - not a literal.
         fatigueCount,
         fatigued: RecommendationService.isFatigued(fatigueCount),
         message: champion
@@ -276,8 +259,3 @@ export const handleDecisionFatigue = async (req: IAuthRequest, res: Response, ne
     next(error);
   }
 };
-
-/** Escape user input before it reaches a MongoDB $regex. */
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}

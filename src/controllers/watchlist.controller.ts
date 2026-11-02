@@ -1,37 +1,36 @@
 import { Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
 import { IAuthRequest } from '../types';
-import { Watchlist, WatchHistory, Title } from '../models';
+import prisma from '../config/prisma';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
 
 /**
  * Resolve the `:id` route parameter, which callers may supply as either a
- * Watchlist document id or a Title id, into the Watchlist document itself.
- *
- * This must happen BEFORE any update. The previous implementation ran a single
- * `findOneAndUpdate` with a `$or: [{ _id: id }, { title: id }]` filter but a
- * hardcoded `title: id` in the update. When the caller passed a Watchlist _id
- * (as WatchlistPage does) the matched row had its `title` overwritten with its
- * own document id - destroying the title reference, so `.populate('title')`
- * returned null and the entry silently vanished from GET /api/watchlist.
+ * Watchlist item id or a Title id.
  */
 async function resolveWatchlistItem(
   userId: string,
   id: string
-): Promise<{ _id: mongoose.Types.ObjectId; title: mongoose.Types.ObjectId } | null> {
-  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+): Promise<{ id: string; titleId: string } | null> {
+  if (!id) return null;
 
-  const byDocId = await Watchlist.findOne({ user: userId, _id: id })
-    .select('_id title')
-    .lean();
-  if (byDocId) return byDocId as any;
-
-  const byTitleId = await Watchlist.findOne({ user: userId, title: id })
-    .select('_id title')
-    .lean();
-  return byTitleId as any;
+  return prisma.watchlist.findFirst({
+    where: {
+      userId,
+      OR: [{ id }, { titleId: id }],
+    },
+    select: { id: true, titleId: true },
+  });
 }
+
+const formatWatchlistItem = (item: any) => {
+  if (!item) return null;
+  return {
+    ...item,
+    _id: item.id,
+    title: item.title ? { ...item.title, _id: item.title.id } : null,
+  };
+};
 
 /**
  * Retrieve current user's real watchlist with populated titles
@@ -46,37 +45,33 @@ export const getWatchlist = async (req: IAuthRequest, res: Response, next: NextF
 
     const { status } = req.query; // 'all' | 'watched' | 'want_to_watch'
 
-    const query: any = { user: userId };
+    const where: any = { userId };
     if (status === 'watched') {
-      query.watched = true;
+      where.watched = true;
     } else if (status === 'want_to_watch') {
-      query.watched = false;
+      where.watched = false;
     }
 
-    const items = await Watchlist.find(query)
-      .populate({
-        path: 'title',
-        select: 'name originalTitle posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview tmdbId',
-      })
-      .sort({ addedAt: -1 })
-      .lean();
+    const items = await prisma.watchlist.findMany({
+      where,
+      include: {
+        title: true,
+      },
+      orderBy: { addedAt: 'desc' },
+    });
 
-    // Filter out any orphaned entries where title was removed
-    const validItems = items.filter((item) => item.title != null);
+    const validItems = items
+      .filter((item) => item.title != null)
+      .map(formatWatchlistItem);
 
-    // Totals are computed WITHOUT the status filter. The frontend previously
-    // derived the filter-pill counts from the already-filtered list, so
-    // selecting "Watched" made "Want to Watch" read 0 and "All" show the
-    // filtered total instead of the real one.
     const [watchedCount, wantToWatchCount] = await Promise.all([
-      Watchlist.countDocuments({ user: userId, watched: true }),
-      Watchlist.countDocuments({ user: userId, watched: false }),
+      prisma.watchlist.count({ where: { userId, watched: true } }),
+      prisma.watchlist.count({ where: { userId, watched: false } }),
     ]);
 
     sendSuccess(
       res,
       {
-        // Total is the unfiltered size of the user's list.
         total: watchedCount + wantToWatchCount,
         watchlist: validItems,
         counts: {
@@ -109,22 +104,28 @@ export const addToWatchlist = async (req: IAuthRequest, res: Response, next: Nex
     }
 
     // Verify title exists
-    const titleExists = await Title.findById(titleId);
+    const titleExists = await prisma.title.findUnique({
+      where: { id: titleId },
+      select: { id: true },
+    });
     if (!titleExists) {
       return next(new AppError('Title not found', 404));
     }
 
-    const item = await Watchlist.findOneAndUpdate(
-      { user: userId, title: titleId },
-      {
-        user: userId,
-        title: titleId,
-        $setOnInsert: { addedAt: new Date(), watched: false },
+    const item = await prisma.watchlist.upsert({
+      where: {
+        userId_titleId: { userId, titleId },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    ).populate('title');
+      create: {
+        userId,
+        titleId,
+        watched: false,
+      },
+      update: {},
+      include: { title: true },
+    });
 
-    sendSuccess(res, { item }, 'Title added to watchlist successfully', 201);
+    sendSuccess(res, { item: formatWatchlistItem(item) }, 'Title added to watchlist successfully', 201);
   } catch (error) {
     next(error);
   }
@@ -141,17 +142,16 @@ export const removeFromWatchlist = async (req: IAuthRequest, res: Response, next
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { id } = req.params;
+    const id = String(req.params.id);
 
-    // Can be deleted by Watchlist document ID or Title ObjectId
-    const deleted = await Watchlist.findOneAndDelete({
-      $and: [
-        { user: userId },
-        { $or: [{ _id: id }, { title: id }] },
-      ],
+    const deleteResult = await prisma.watchlist.deleteMany({
+      where: {
+        userId,
+        OR: [{ id }, { titleId: id }],
+      },
     });
 
-    if (!deleted) {
+    if (deleteResult.count === 0) {
       return next(new AppError('Watchlist item not found', 404));
     }
 
@@ -175,40 +175,32 @@ export const markAsWatched = async (req: IAuthRequest, res: Response, next: Next
     const { watched = true } = req.body;
     const id = String(req.params.id);
 
-    // Resolve first, then update by the document's own _id. `title` is never
-    // written here, so the existing reference cannot be corrupted.
     const existing = await resolveWatchlistItem(userId, id);
     if (!existing) {
       return next(new AppError('Watchlist item not found', 404));
     }
 
-    const item = await Watchlist.findOneAndUpdate(
-      { _id: existing._id, user: userId },
-      {
-        $set: {
-          watched: Boolean(watched),
-          watchedAt: watched ? new Date() : null,
-        },
+    const item = await prisma.watchlist.update({
+      where: { id: existing.id },
+      data: {
+        watched: Boolean(watched),
+        watchedAt: watched ? new Date() : null,
       },
-      { new: true }
-    ).populate('title');
-
-    if (!item) {
-      return next(new AppError('Watchlist item not found', 404));
-    }
+      include: { title: true },
+    });
 
     if (watched) {
-      // `item.title` is a populated document; store the raw id.
-      const titleId = (item.title as any)?._id?.toString() || existing.title.toString();
-      await WatchHistory.create({
-        user: userId,
-        title: titleId,
-        action: 'watched',
-        timestamp: new Date(),
+      await prisma.watchHistory.create({
+        data: {
+          userId,
+          titleId: existing.titleId,
+          action: 'watched',
+          timestamp: new Date(),
+        },
       });
     }
 
-    sendSuccess(res, { item }, watched ? 'Marked as watched' : 'Marked as unwatched');
+    sendSuccess(res, { item: formatWatchlistItem(item) }, watched ? 'Marked as watched' : 'Marked as unwatched');
   } catch (error) {
     next(error);
   }
@@ -233,7 +225,6 @@ export const rateTitle = async (req: IAuthRequest, res: Response, next: NextFunc
       return next(new AppError('Rating must be an integer between 1 and 5', 400));
     }
 
-    // Same resolve-then-update pattern as markAsWatched: never write `title`.
     const existing = await resolveWatchlistItem(userId, id);
     if (!existing) {
       return next(new AppError(
@@ -242,34 +233,27 @@ export const rateTitle = async (req: IAuthRequest, res: Response, next: NextFunc
       ));
     }
 
-    const item = await Watchlist.findOneAndUpdate(
-      { _id: existing._id, user: userId },
-      {
-        $set: {
-          starRating: numRating,
-          watched: true,
-          watchedAt: new Date(),
-        },
+    const item = await prisma.watchlist.update({
+      where: { id: existing.id },
+      data: {
+        starRating: numRating,
+        watched: true,
+        watchedAt: new Date(),
       },
-      { new: true }
-    ).populate('title');
-
-    if (!item) {
-      return next(new AppError('Watchlist item not found', 404));
-    }
-
-    // WatchHistory feeds the recency-weighted taste profile, so the title id
-    // must be the raw ObjectId, not a populated document.
-    const titleId = (item.title as any)?._id?.toString() || existing.title.toString();
-    await WatchHistory.create({
-      user: userId,
-      title: titleId,
-      action: 'rated',
-      rating: numRating,
-      timestamp: new Date(),
+      include: { title: true },
     });
 
-    sendSuccess(res, { item }, 'Rating recorded successfully');
+    await prisma.watchHistory.create({
+      data: {
+        userId,
+        titleId: existing.titleId,
+        action: 'rated',
+        rating: numRating,
+        timestamp: new Date(),
+      },
+    });
+
+    sendSuccess(res, { item: formatWatchlistItem(item) }, 'Rating recorded successfully');
   } catch (error) {
     next(error);
   }
@@ -296,11 +280,13 @@ export const getTitleWatchlistStatus = async (req: IAuthRequest, res: Response, 
       return;
     }
 
-    const { titleId } = req.params;
-    const item = await Watchlist.findOne({
-      user: userId,
-      $or: [{ title: titleId }, { _id: titleId }],
-    }).lean();
+    const titleId = String(req.params.titleId);
+    const item = await prisma.watchlist.findFirst({
+      where: {
+        userId,
+        OR: [{ titleId }, { id: titleId }],
+      },
+    });
 
     sendSuccess(
       res,
@@ -308,7 +294,7 @@ export const getTitleWatchlistStatus = async (req: IAuthRequest, res: Response, 
         inWatchlist: Boolean(item),
         watched: Boolean(item?.watched),
         starRating: item?.starRating || 0,
-        item: item || null,
+        item: item ? formatWatchlistItem(item) : null,
       },
       'Title watchlist status retrieved'
     );

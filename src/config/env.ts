@@ -37,7 +37,7 @@ const INSECURE_DEFAULTS = ['cinecircle_jwt_secret_dev', 'cinecircle_curator_secr
 export const ENV = {
   PORT: process.env.PORT || 5000,
   NODE_ENV: process.env.NODE_ENV || 'development',
-  MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/cinecircle',
+  DATABASE_URL: process.env.DATABASE_URL || '',
   JWT_SECRET: assertNotPlaceholder(
     'JWT_SECRET',
     process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : requiredSecret('JWT_SECRET', 'JWT signing secret')),

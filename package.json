@@ -5,23 +5,23 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js",
-    "postinstall": "npm run build"
+    "postinstall": "prisma generate"
   },
   "keywords": [
     "cinecircle",
     "express",
     "typescript",
-    "mongodb",
-    "mongoose",
+    "postgresql",
+    "prisma",
     "socket.io"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@prisma/client": "^7.10.1",
+    "@prisma/client": "^6.19.3",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -38,7 +38,7 @@
     "@types/jsonwebtoken": "^9.0.8",
     "@types/node": "^22.10.7",
     "@types/nodemailer": "^8.0.2",
-    "prisma": "^8.0.0-rc.29",
+    "prisma": "^6.19.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

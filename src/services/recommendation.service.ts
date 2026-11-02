@@ -1,4 +1,4 @@
-import { Title, TasteProfile, User, WatchHistory } from '../models';
+import prisma from '../config/prisma';
 
 /**
  * Recommendation Engine Service
@@ -7,8 +7,7 @@ import { Title, TasteProfile, User, WatchHistory } from '../models';
  *  1. Recency-weighted taste profile decay:
  *       genreScore(g) = Σ( rating × 0.5^(ageDays / 60) )
  *     A rating made today counts fully; one made 60 days ago counts half as
- *     much; 120 days ago, a quarter. That is what lets a user's taste drift
- *     instead of freezing at whatever they rated first.
+ *     much; 120 days ago, a quarter.
  *
  *  2. Solo mode weighted match score (normalised to 0-100):
  *       score = (genreMatch × 0.35) + (moodTagMatch × 0.35)
@@ -27,12 +26,6 @@ const MAX_HISTORY_EVENTS = 500;
 /** A mood only narrows shortlists once fatigue has passed this threshold. */
 export const FATIGUE_THRESHOLD = 2;
 
-/**
- * Mood -> the moodTags vocabulary actually produced by TmdbService.generateMoodTags()
- * and the seeded catalogue. Matching the real vocabulary matters: the previous
- * implementation did `moodTag.includes(mood)`, so 'Comfort', 'Gripping' and
- * 'Fun' could never match any tag and their bonus was unreachable.
- */
 const MOOD_TAGS: Record<string, string[]> = {
   Comfort: ['Feel-Good', 'Heartwarming', 'Nostalgic', 'Engaging'],
   Gripping: ['Dark & Gritty', 'High-Stakes', 'Intense', 'Suspenseful', 'Atmospheric'],
@@ -84,46 +77,42 @@ export class RecommendationService {
 
   /**
    * Build the user's recency-weighted genre affinities from their WatchHistory.
-   *
-   * This is the first reader of WatchHistory in the codebase - previously the
-   * collection was written to but never queried, so taste could not evolve.
-   * The result is cached onto TasteProfile so it can be inspected and reused.
    */
   public static async computeRecencyWeightedTasteProfile(userId: string): Promise<WeightedTaste> {
     const computedAt = new Date();
 
-    const history = await WatchHistory.find({
-      user: userId,
-      action: { $in: ['watched', 'rated'] },
-    })
-      .sort({ timestamp: -1 })
-      .limit(MAX_HISTORY_EVENTS)
-      .lean();
+    const history = await prisma.watchHistory.findMany({
+      where: {
+        userId,
+        action: { in: ['watched', 'rated'] },
+      },
+      orderBy: { timestamp: 'desc' },
+      take: MAX_HISTORY_EVENTS,
+    });
 
     if (history.length === 0) {
       return { genreScores: {}, totalEvents: 0, lastComputedAt: computedAt };
     }
 
-    const titleIds = Array.from(new Set(history.map((h) => h.title.toString())));
-    const titles = await Title.find({ _id: { $in: titleIds } })
-      .select('genres')
-      .lean();
+    const titleIds = Array.from(new Set(history.map((h) => h.titleId)));
+    const titles = await prisma.title.findMany({
+      where: { id: { in: titleIds } },
+      select: { id: true, genres: true },
+    });
 
     const genresByTitle = new Map<string, string[]>(
-      titles.map((t: any) => [t._id.toString(), Array.isArray(t.genres) ? t.genres : []])
+      titles.map((t) => [t.id, Array.isArray(t.genres) ? t.genres : []])
     );
 
     const genreScores: Record<string, number> = {};
 
-    for (const entry of history as any[]) {
-      const genres = genresByTitle.get(entry.title.toString()) || [];
+    for (const entry of history) {
+      const genres = genresByTitle.get(entry.titleId) || [];
       if (genres.length === 0) continue;
 
       const rating = typeof entry.rating === 'number' ? entry.rating : NEUTRAL_RATING;
       const weighted = rating * this.recencyWeight(entry.timestamp);
 
-      // Spread each rating across the title's genres so a 3-genre title does
-      // not triple-count against a 1-genre title.
       const share = weighted / genres.length;
       for (const genre of genres) {
         const key = String(genre).trim();
@@ -134,11 +123,21 @@ export class RecommendationService {
 
     const result: WeightedTaste = { genreScores, totalEvents: history.length, lastComputedAt: computedAt };
 
-    await TasteProfile.updateOne(
-      { user: userId },
-      { $set: { genreScores, tasteComputedAt: computedAt } },
-      { upsert: true, setDefaultsOnInsert: true }
-    ).catch((err: any) => {
+    await prisma.tasteProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        genreScores,
+        tasteComputedAt: computedAt,
+        favoriteGenres: [],
+        favoriteTitleIds: [],
+        exclusions: [],
+      },
+      update: {
+        genreScores,
+        tasteComputedAt: computedAt,
+      },
+    }).catch((err: any) => {
       console.warn('[RecommendationService] Could not persist genre scores:', err.message);
     });
 
@@ -159,21 +158,18 @@ export class RecommendationService {
     if (!userId) return empty;
 
     const [profile, user] = await Promise.all([
-      TasteProfile.findOne({ user: userId }).lean(),
-      User.findById(userId).select('subscribedServices fatigueCount').lean(),
+      prisma.tasteProfile.findUnique({ where: { userId } }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { subscribedServices: true, fatigueCount: true },
+      }),
     ]);
 
     let genreScores: Record<string, number> = {};
 
-    if (profile?.genreScores) {
-      // Mongoose returns a Map for Map-typed paths; normalise to a plain object.
-      const raw = profile.genreScores as any;
-      genreScores =
-        raw instanceof Map
-          ? Object.fromEntries(Array.from(raw.entries()))
-          : (raw as Record<string, number>);
+    if (profile?.genreScores && typeof profile.genreScores === 'object' && !Array.isArray(profile.genreScores)) {
+      genreScores = profile.genreScores as Record<string, number>;
     } else if (profile) {
-    // Never computed (profiles created before this feature) - do it once now.
       const computed = await this.computeRecencyWeightedTasteProfile(userId);
       genreScores = computed.genreScores;
     }
@@ -187,12 +183,7 @@ export class RecommendationService {
   }
 
   /**
-   * Solo-mode scoring, exactly as documented:
-   *   (genreMatch × 0.35) + (moodTagMatch × 0.35) + (runtimeFit × 0.15)
-   *   + (ownedServiceBonus × 0.15)          → × 100
-   *
-   * Every term is normalised to 0..1 first, so the weights are meaningful and
-   * the result is a genuine 0-100 fit rather than a value clamped to 68..99.
+   * Solo-mode scoring
    */
   public static scoreSoloCandidate(
     title: any,
@@ -229,14 +220,11 @@ export class RecommendationService {
     const total = entries.reduce<number>((sum, [, v]) => sum + (Number(v) || 0), 0);
 
     if (total > 0) {
-      // Exact (case-insensitive) genre key match only - substring matching here
-      // let "Drama" swallow "Drama & Thriller" and similar near-duplicates.
       const lookup = new Map(entries.map(([k, v]) => [k.toLowerCase(), Number(v) || 0]));
       const covered = titleGenres.reduce<number>((sum, g) => sum + (lookup.get(g) || 0), 0);
       return Math.min(1, covered / total);
     }
 
-    // No watch history yet: fall back to declared favourite genres.
     const favourites = (context.favoriteGenres || []).map((g: string) => g.toLowerCase());
     if (favourites.length === 0) return 0;
     const hits = titleGenres.filter((g: string) => favourites.includes(g)).length;
@@ -261,20 +249,14 @@ export class RecommendationService {
     return hits / wanted.length;
   }
 
-  /**
-   * How well the runtime serves the user's available window.
-   * Unknown runtime scores neutral rather than perfect.
-   */
   private static computeRuntimeFit(runtimeMinutes: number, maxRuntime: number): number {
     const runtime = Number(runtimeMinutes) || 0;
     if (runtime <= 0 || !maxRuntime || maxRuntime <= 0) return 0.5;
 
     if (runtime <= maxRuntime) {
-      // Fills at least 60% of the window without exceeding it: ideal.
       const ratio = runtime / maxRuntime;
       return ratio >= 0.6 ? 1 : ratio / 0.6;
     }
-    // Overran the window - penalise proportionally, steeper past 2×.
     const overshoot = (runtime - maxRuntime) / maxRuntime;
     return Math.max(0, 1 - overshoot * 2);
   }
@@ -295,25 +277,18 @@ export class RecommendationService {
     return exclusions.some((raw) => {
       const needle = String(raw).toLowerCase().trim();
       if (!needle) return false;
-      // Exact genre match only. The previous bidirectional substring check meant
-      // an exclusion like "Musical" also killed "Musical Comedy", and any short
-      // free-text exclusion silently wiped out unrelated genres.
       return titleGenres.includes(needle);
     });
   }
 
   /**
    * Group mode compromise score.
-   *   titleScore = Σ( voteStrength_i × (+1 if 'yes' else −1) ) / participantCount
-   *
-   * Dividing by participantCount makes scores comparable across room sizes, so
-   * a 20-person room showing 40% enthusiasm reads lower than a 3-person room at 40%.
    */
   public static computeGroupCompromise(votes: any[], participantCount: number): CompromiseScore[] {
     const totals = new Map<string, CompromiseScore>();
 
     for (const vote of votes || []) {
-      const key = vote.title?.toString();
+      const key = vote.titleId || vote.title?.toString();
       if (!key) continue;
       if (!totals.has(key)) {
         totals.set(key, { titleId: key, score: 0, yesCount: 0, noCount: 0 });
@@ -336,19 +311,20 @@ export class RecommendationService {
     }));
   }
 
-  /**
-   * Record that a decision session ended without a pick and return the new count.
-   */
   public static async recordDecisionFatigue(userId: string): Promise<number> {
-    const user = await User.findByIdAndUpdate(userId, { $inc: { fatigueCount: 1 } }, { new: true })
-      .select('fatigueCount')
-      .lean();
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { fatigueCount: { increment: 1 } },
+      select: { fatigueCount: true },
+    }).catch(() => null);
     return user?.fatigueCount ?? 1;
   }
 
-  /** Reset once a decision is actually made. */
   public static async clearDecisionFatigue(userId: string): Promise<void> {
-    await User.findByIdAndUpdate(userId, { $set: { fatigueCount: 0 } });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fatigueCount: 0 },
+    }).catch(() => null);
   }
 
   public static isFatigued(fatigueCount: number | undefined | null): boolean {

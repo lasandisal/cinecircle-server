@@ -1,10 +1,10 @@
 import { Request } from 'express';
-import { Types } from 'mongoose';
 
-export type UserRole = 'user' | 'admin';
+export type UserRole = 'user' | 'admin' | 'curator';
 
 export interface IUser {
-  _id: Types.ObjectId;
+  _id: string;
+  id?: string;
   name: string;
   email: string;
   passwordHash: string;
@@ -12,7 +12,7 @@ export interface IUser {
   avatar?: string;
   handle?: string;
   bio?: string;
-  tasteProfile?: Types.ObjectId;
+  tasteProfile?: string;
   subscribedServices: string[];
   fatigueCount: number;
   onboarded?: boolean;
@@ -30,9 +30,10 @@ export interface IAuthRequest extends Request {
 export type ActionType = 'watched' | 'rated' | 'skipped' | 'picked';
 
 export interface IWatchlist {
-  _id: Types.ObjectId;
-  user: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  user: string;
+  title: string;
   watched: boolean;
   starRating?: number;
   addedAt: Date;
@@ -40,9 +41,10 @@ export interface IWatchlist {
 }
 
 export interface IWatchHistory {
-  _id: Types.ObjectId;
-  user: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  user: string;
+  title: string;
   action: ActionType;
   rating?: number;
   moodAtTime?: string;
@@ -50,10 +52,11 @@ export interface IWatchHistory {
 }
 
 export interface ITasteProfile {
-  _id: Types.ObjectId;
-  user: Types.ObjectId;
+  _id: string;
+  id?: string;
+  user: string;
   favoriteGenres: string[];
-  favoriteTitles: Types.ObjectId[];
+  favoriteTitles: string[];
   exclusions: string[];
   /** Recency-weighted per-genre affinities (see RecommendationService). */
   genreScores?: Record<string, number>;
@@ -62,11 +65,12 @@ export interface ITasteProfile {
 }
 
 export interface ITitle {
-  _id: Types.ObjectId;
+  _id: string;
+  id?: string;
   tmdbId: number;
   name: string;
   originalName?: string;
-  type: 'tv' | 'film';
+  type: 'tv' | 'film' | 'movie';
   genres: string[];
   synopsis: string;
   runtimeMinutes: number;
@@ -84,8 +88,9 @@ export interface ITitle {
 }
 
 export interface ISeasonEpisode {
-  _id: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  title: string;
   seasonNumber: number;
   episodes: {
     episodeNumber: number;
@@ -109,8 +114,9 @@ export interface ISeasonEpisode {
 }
 
 export interface ISoundtrack {
-  _id: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  title: string;
   songName: string;
   artist: string;
   episodeRef?: string;
@@ -118,7 +124,7 @@ export interface ISoundtrack {
   previewUrl?: string;
   albumArtUrl?: string;
   spotifyUrl?: string;
-  addedBy?: Types.ObjectId;
+  addedBy?: string;
   /**
    * Provenance of the track:
    * - 'curated' seeded from the curated catalogue
@@ -132,33 +138,36 @@ export interface ISoundtrack {
 }
 
 export interface ISession {
-  _id: Types.ObjectId;
+  _id: string;
+  id?: string;
   name?: string;
-  host: Types.ObjectId;
+  host: string;
   joinCode: string;
-  participants: Types.ObjectId[];
+  participants: string[];
   constraints: {
     maxRuntime?: number;
     moodFilter?: string;
   };
-  shortlist: Types.ObjectId[];
+  shortlist: string[];
   status: 'open' | 'closed';
-  finalPick?: Types.ObjectId;
+  finalPick?: string;
   createdAt: Date;
 }
 
 export interface IVote {
-  _id: Types.ObjectId;
-  session: Types.ObjectId;
-  user: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  session: string;
+  user: string;
+  title: string;
   reaction: 'yes' | 'no';
   strength: number;
 }
 
 export interface IWatchProvider {
-  _id: Types.ObjectId;
-  title: Types.ObjectId;
+  _id: string;
+  id?: string;
+  title: string;
   service: string;
   region: string;
   type: 'subscription' | 'rental' | 'purchase';
@@ -168,23 +177,24 @@ export interface IWatchProvider {
 export type ReactionType = 'like' | 'love' | 'fire' | 'mindblown' | 'popcorn' | 'sad';
 
 export interface IComment {
-  _id: Types.ObjectId;
-  title: Types.ObjectId;
-  user: Types.ObjectId;
+  _id: string;
+  id?: string;
+  title: string;
+  user: string;
   text: string;
   rating?: number;
   likesCount?: number;
-  parentId?: Types.ObjectId;
+  parentId?: string;
   reactions?: {
-    user: Types.ObjectId;
+    user: string;
     emoji: ReactionType;
   }[];
   poll?: {
     question: string;
     options: {
-      _id?: Types.ObjectId;
+      _id?: string;
       optionText: string;
-      votes: Types.ObjectId[];
+      votes: string[];
     }[];
   };
   containsSpoilers?: boolean;
@@ -192,22 +202,23 @@ export interface IComment {
   hidden: boolean;
   /** Individual reports, so moderators can see who flagged what and why. */
   reports?: {
-    user: Types.ObjectId;
+    user: string;
     reason?: string;
     createdAt: Date;
   }[];
   reportCount?: number;
   reportedAt?: Date;
   hiddenAt?: Date;
-  hiddenBy?: Types.ObjectId;
+  hiddenBy?: string;
   createdAt: Date;
 }
 
 export interface IFollow {
-  _id: Types.ObjectId;
-  follower: Types.ObjectId;
+  _id: string;
+  id?: string;
+  follower: string;
   followedType: 'user' | 'title';
-  followedUser?: Types.ObjectId;
-  followedTitle?: Types.ObjectId;
+  followedUser?: string;
+  followedTitle?: string;
   createdAt: Date;
 }

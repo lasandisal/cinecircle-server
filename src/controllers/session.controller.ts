@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { IAuthRequest } from '../types';
-import { Session, Title, User, Vote } from '../models';
+import prisma from '../config/prisma';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
 import { tmdbService } from '../services/TmdbService';
@@ -20,99 +20,41 @@ function generateJoinCode(): string {
 }
 
 /**
- * Helper to fetch, sanitize, and populate a session with deduplicated participants
+ * Helper to fetch, sanitize, and populate a session
  */
-async function getPopulatedSession(sessionId: any) {
-  const sessionDoc = await Session.findById(sessionId);
-  if (!sessionDoc) return null;
+async function getPopulatedSession(sessionId: string) {
+  if (!sessionId) return null;
 
-  // Clean duplicate ObjectIds in DB if any exist
-  const uniqueParticipantIds = Array.from(
-    new Set(sessionDoc.participants.map((p: any) => p.toString()))
-  );
-  if (uniqueParticipantIds.length !== sessionDoc.participants.length) {
-    sessionDoc.participants = uniqueParticipantIds as any;
-    await sessionDoc.save();
-  }
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      creator: { select: { id: true, name: true, email: true, avatar: true } },
+      participants: { select: { id: true, name: true, email: true, avatar: true } },
+    },
+  });
 
-  const populated = await Session.findById(sessionId)
-    .populate('host', 'name email avatar')
-    .populate('participants', 'name email avatar')
-    .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-    .populate('finalPick', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-    .lean();
+  if (!session) return null;
 
-  if (populated?.participants) {
-    const seen = new Set<string>();
-    populated.participants = populated.participants.filter((p: any) => {
-      const pid = (p?._id || p)?.toString();
-      if (!pid || seen.has(pid)) return false;
-      seen.add(pid);
-      return true;
-    });
-  }
+  const shortlist = session.shortlistIds && session.shortlistIds.length > 0
+    ? await prisma.title.findMany({
+        where: { id: { in: session.shortlistIds } },
+      })
+    : [];
 
-  return populated;
+  const finalPick = session.finalPickId
+    ? await prisma.title.findUnique({ where: { id: session.finalPickId } })
+    : null;
+
+  return {
+    ...session,
+    _id: session.id,
+    host: session.creator ? { ...session.creator, _id: session.creator.id } : null,
+    participants: session.participants.map((p) => ({ ...p, _id: p.id })),
+    shortlist: shortlist.map((t) => ({ ...t, _id: t.id })),
+    finalPick: finalPick ? { ...finalPick, _id: finalPick.id } : null,
+  };
 }
 
-/**
- * Create a new group decision room with real shortlist candidates
- * POST /api/sessions/create
- */
-export const createSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return next(new AppError('Unauthorized', 401));
-    }
-
-    const { name, maxRuntime, moodFilter, shortlistTitleIds } = req.body;
-
-    let candidateIds = Array.isArray(shortlistTitleIds) && shortlistTitleIds.length > 0 ? shortlistTitleIds : [];
-
-    // If no candidate titles were selected, automatically seed with 3-4 top real titles from MongoDB
-    if (candidateIds.length === 0) {
-      const titles = await Title.find().sort({ voteAverage: -1 }).limit(4).select('_id').lean();
-      candidateIds = titles.map((t) => t._id);
-    }
-
-    // Generate unique join code
-    let joinCode = generateJoinCode();
-    let collision = await Session.findOne({ joinCode });
-    while (collision) {
-      joinCode = generateJoinCode();
-      collision = await Session.findOne({ joinCode });
-    }
-
-    const session = await Session.create({
-      name: name?.trim() || 'Watch Decision Party',
-      host: userId,
-      joinCode,
-      participants: [userId],
-      constraints: {
-        maxRuntime: maxRuntime ? Number(maxRuntime) : undefined,
-        moodFilter: moodFilter?.trim() || undefined,
-      },
-      shortlist: candidateIds,
-      status: 'open',
-      createdAt: new Date(),
-    });
-
-    const populatedSession = await getPopulatedSession(session._id);
-
-    sendSuccess(res, { session: populatedSession, joinCode }, 'Group session created successfully', 201);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Strip internal fields from populated user refs.
- *
- * GET /sessions/active and GET /sessions/code/:code are public, and both used
- * to return host + participant emails plus every voter's identity to anonymous
- * callers. Only display-safe fields are returned now.
- */
 function sanitizePeople(doc: any): any {
   if (!doc) return doc;
   const { email, passwordHash, subscribedServices, tasteProfile, fatigueCount, ...safe } = doc;
@@ -129,84 +71,139 @@ function sanitizeSessionPeople(session: any): any {
 }
 
 /**
+ * Create a new group decision room with real shortlist candidates
+ * POST /api/sessions/create
+ */
+export const createSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const { name, maxRuntime, moodFilter, shortlistTitleIds } = req.body;
+
+    let candidateIds: string[] = Array.isArray(shortlistTitleIds) && shortlistTitleIds.length > 0 ? shortlistTitleIds : [];
+
+    // If no candidate titles were selected, automatically seed with 4 top real titles from PostgreSQL
+    if (candidateIds.length === 0) {
+      const titles = await prisma.title.findMany({
+        orderBy: { voteAverage: 'desc' },
+        take: 4,
+        select: { id: true },
+      });
+      candidateIds = titles.map((t) => t.id);
+    }
+
+    // Generate unique join code
+    let joinCode = generateJoinCode();
+    let collision = await prisma.session.findUnique({ where: { joinCode } });
+    while (collision) {
+      joinCode = generateJoinCode();
+      collision = await prisma.session.findUnique({ where: { joinCode } });
+    }
+
+    const session = await prisma.session.create({
+      data: {
+        name: name?.trim() || 'Watch Decision Party',
+        creatorId: userId,
+        joinCode,
+        status: 'open',
+        shortlistIds: candidateIds,
+        constraints: {
+          maxRuntime: maxRuntime ? Number(maxRuntime) : undefined,
+          moodFilter: moodFilter?.trim() || undefined,
+        },
+        participants: {
+          connect: { id: userId },
+        },
+      },
+    });
+
+    const populatedSession = await getPopulatedSession(session.id);
+
+    sendSuccess(res, { session: populatedSession, joinCode }, 'Group session created successfully', 201);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Retrieve all currently active open sessions (for circles carousel)
  * GET /api/sessions/active
  */
 export const getActiveSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const sessions = await Session.find({ status: 'open' })
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate('shortlist', 'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage overview synopsis')
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
+    const sessions = await prisma.session.findMany({
+      where: { status: 'open' },
+      include: {
+        creator: { select: { id: true, name: true, email: true, avatar: true } },
+        participants: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
 
-    // Real per-candidate vote tallies so the poll card can show actual
-    // percentages instead of index-derived ones.
-    const sessionIds = sessions.map((s: any) => s._id);
-    const voteRows = sessionIds.length
-      ? await Vote.aggregate([
-          { $match: { session: { $in: sessionIds } } },
-          {
-            $group: {
-              _id: { session: '$session', title: '$title', reaction: '$reaction' },
-              count: { $sum: 1 },
-              strength: { $sum: '$strength' },
-            },
-          },
-        ])
+    const sessionIds = sessions.map((s) => s.id);
+    const votes = sessionIds.length
+      ? await prisma.vote.findMany({
+          where: { sessionId: { in: sessionIds } },
+        })
       : [];
 
     const tallyBySession = new Map<string, Map<string, { yes: number; no: number; net: number }>>();
-    for (const row of voteRows) {
-      const sid = row._id.session.toString();
-      const tid = row._id.title.toString();
+    for (const v of votes) {
+      const sid = v.sessionId;
+      const tid = v.titleId;
       if (!tallyBySession.has(sid)) tallyBySession.set(sid, new Map());
       const perTitle = tallyBySession.get(sid)!;
       if (!perTitle.has(tid)) perTitle.set(tid, { yes: 0, no: 0, net: 0 });
       const entry = perTitle.get(tid)!;
-      if (row._id.reaction === 'yes') {
-        entry.yes += row.count;
-        entry.net += row.strength || row.count;
+      if (v.reaction === 'yes') {
+        entry.yes += 1;
+        entry.net += v.strength || 1;
       } else {
-        entry.no += row.count;
-        entry.net -= row.strength || row.count;
+        entry.no += 1;
+        entry.net -= v.strength || 1;
       }
     }
 
-    // Deduplicate participants in active sessions
-    const sanitized = sessions.map((s: any) => {
-      if (s.participants) {
-        const seen = new Set<string>();
-        s.participants = s.participants.filter((p: any) => {
-          const pid = (p?._id || p)?.toString();
-          if (!pid || seen.has(pid)) return false;
-          seen.add(pid);
-          return true;
-        });
-      }
-      sanitizeSessionPeople(s);
+    // Load shortlist titles for all sessions
+    const allShortlistIds = Array.from(new Set(sessions.flatMap((s) => s.shortlistIds)));
+    const allTitles = allShortlistIds.length
+      ? await prisma.title.findMany({ where: { id: { in: allShortlistIds } } })
+      : [];
+    const titleMap = new Map(allTitles.map((t) => [t.id, t]));
 
-      const perTitle = tallyBySession.get(s._id.toString());
-      const participantCount = (s.participants || []).length || 1;
+    const sanitized = sessions.map((s) => {
+      const sessionDoc: any = {
+        ...s,
+        _id: s.id,
+        host: s.creator ? { ...s.creator, _id: s.creator.id } : null,
+        participants: s.participants.map((p) => ({ ...p, _id: p.id })),
+        shortlist: s.shortlistIds.map((tid) => titleMap.get(tid)).filter(Boolean).map((t: any) => ({ ...t, _id: t.id })),
+      };
 
-      s.voteTally = (s.shortlist || []).map((t: any) => {
-        const counts = perTitle?.get(t._id.toString()) || { yes: 0, no: 0, net: 0 };
+      sanitizeSessionPeople(sessionDoc);
+
+      const perTitle = tallyBySession.get(s.id);
+      const participantCount = s.participants.length || 1;
+
+      sessionDoc.voteTally = (sessionDoc.shortlist || []).map((t: any) => {
+        const counts = perTitle?.get(t.id) || { yes: 0, no: 0, net: 0 };
         const totalVotes = counts.yes + counts.no;
         return {
-          titleId: t._id.toString(),
+          titleId: t.id,
           yes: counts.yes,
           no: counts.no,
           totalVotes,
-          // Real percentage of participants who voted yes.
           yesPercent: Math.round((counts.yes / participantCount) * 100),
           netScore: counts.net / participantCount,
         };
       });
 
-      s.participantCount = (s.participants || []).length;
-      return s;
+      sessionDoc.participantCount = s.participants.length;
+      return sessionDoc;
     });
 
     sendSuccess(res, { sessions: sanitized }, 'Active sessions retrieved');
@@ -224,18 +221,17 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
     const { joinCode } = req.params;
     const cleanCode = String(joinCode || '').toUpperCase().trim();
 
-    const sessionDoc = await Session.findOne({ joinCode: cleanCode });
+    const sessionDoc = await prisma.session.findUnique({
+      where: { joinCode: cleanCode },
+    });
     if (!sessionDoc) {
       return next(new AppError('Session room not found with code ' + cleanCode, 404));
     }
 
-    const populatedSession = await getPopulatedSession(sessionDoc._id);
+    const populatedSession = await getPopulatedSession(sessionDoc.id);
     sanitizeSessionPeople(populatedSession);
 
-    // Votes are public too - strip emails from voter records.
-    const votes = await Vote.find({ session: sessionDoc._id })
-      .populate('user', 'name email avatar')
-      .lean();
+    const votes = await SessionService.getVotes(sessionDoc.id);
     const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
 
     sendSuccess(res, { session: populatedSession, votes: safeVotes }, 'Session retrieved successfully');
@@ -245,7 +241,7 @@ export const getSessionByCode = async (req: Request, res: Response, next: NextFu
 };
 
 /**
- * Join an existing watch decision session (Atomic $addToSet prevents duplicates)
+ * Join an existing watch decision session
  * POST /api/sessions/join
  */
 export const joinSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -258,17 +254,15 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
     const { joinCode } = req.body;
 
     try {
-      // Same code path the socket uses, including the "closed rooms are not
-      // joinable" rule.
       const { session, alreadyPresent } = await SessionService.joinByCode(joinCode, userId);
-      const populatedSession = await getPopulatedSession(session._id);
-      const votes = await SessionService.getVotes(session._id.toString());
+      const populatedSession = await getPopulatedSession(session.id || session._id);
+      const votes = await SessionService.getVotes(session.id || session._id);
       const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
       sanitizeSessionPeople(populatedSession);
 
       if (!alreadyPresent) {
-        SocketService.emitToSession(session._id.toString(), 'participant:joined', {
-          sessionId: session._id.toString(),
+        SocketService.emitToSession(session.id || session._id, 'participant:joined', {
+          sessionId: session.id || session._id,
           user: { id: userId },
         });
       }
@@ -283,7 +277,7 @@ export const joinSession = async (req: IAuthRequest, res: Response, next: NextFu
 };
 
 /**
- * Add a title (movie/show) to the candidate shortlist of an active session
+ * Add a title to the candidate shortlist of an active session
  * POST /api/sessions/:sessionId/shortlist
  */
 export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -293,10 +287,13 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { sessionId } = req.params;
+    const sessionId = String(req.params.sessionId);
     const { titleId, tmdbId, type, titleData } = req.body;
 
-    const session = await Session.findById(sessionId);
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { participants: { select: { id: true } } },
+    });
     if (!session) {
       return next(new AppError('Session room not found', 404));
     }
@@ -305,9 +302,6 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
       return next(new AppError('Cannot add titles to a closed/finalized session', 400));
     }
 
-    // Membership check. This endpoint previously required only *authentication*,
-    // so any signed-in user could add candidates to any room, including rooms
-    // they were not part of.
     if (!SessionService.isMember(session, userId)) {
       return next(
         new AppError('Join the room with its code before adding candidates', 403)
@@ -316,74 +310,57 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
 
     let finalTitleId = titleId;
 
-    // 1. If tmdbId is provided, find or create title in MongoDB
     if (!finalTitleId && tmdbId) {
-      let titleDoc = await Title.findOne({ tmdbId: Number(tmdbId) });
+      let titleDoc = await prisma.title.findUnique({ where: { tmdbId: Number(tmdbId) } });
       if (!titleDoc) {
         if (titleData) {
-          titleDoc = await Title.create({
-            name: titleData.name || titleData.title,
-            originalName: titleData.originalName,
-            type: titleData.type || (type === 'tv' ? 'tv' : 'film'),
-            tmdbId: Number(tmdbId),
-            releaseYear: titleData.releaseYear,
-            runtimeMinutes: titleData.runtimeMinutes,
-            genres: titleData.genres || [],
-            overview: titleData.overview || titleData.synopsis,
-            synopsis: titleData.synopsis || titleData.overview,
-            posterUrl: titleData.posterUrl,
-            backdropUrl: titleData.backdropUrl,
-            voteAverage: titleData.voteAverage || 7.5,
-            voteCount: titleData.voteCount || 100,
+          titleDoc = await prisma.title.create({
+            data: {
+              name: titleData.name || titleData.title,
+              originalName: titleData.originalName,
+              type: titleData.type || (type === 'tv' ? 'tv' : 'film'),
+              tmdbId: Number(tmdbId),
+              releaseYear: titleData.releaseYear,
+              runtimeMinutes: titleData.runtimeMinutes,
+              genres: titleData.genres || [],
+              synopsis: titleData.synopsis || titleData.overview || '',
+              posterUrl: titleData.posterUrl,
+              backdropUrl: titleData.backdropUrl,
+              voteAverage: titleData.voteAverage || 7.5,
+            },
           });
         } else if (tmdbService.hasApiKey()) {
           const mediaType: 'tv' | 'film' = type === 'tv' ? 'tv' : 'film';
           const details = await tmdbService.fetchDetails(Number(tmdbId), mediaType);
           if (details) {
-            titleDoc = await Title.create({
-              name: details.name,
-              originalName: details.originalName,
-              type: details.type,
-              tmdbId: details.tmdbId,
-              releaseYear: details.releaseYear,
-              runtimeMinutes: details.runtimeMinutes,
-              genres: details.genres,
-              overview: details.synopsis,
-              synopsis: details.synopsis,
-              posterUrl: details.posterUrl,
-              backdropUrl: details.backdropUrl,
-              voteAverage: details.voteAverage,
-              moodTags: details.moodTags || [],
+            titleDoc = await prisma.title.create({
+              data: {
+                name: details.name,
+                originalName: details.originalName,
+                type: details.type,
+                tmdbId: details.tmdbId,
+                releaseYear: details.releaseYear,
+                runtimeMinutes: details.runtimeMinutes,
+                genres: details.genres,
+                synopsis: details.synopsis || '',
+                posterUrl: details.posterUrl,
+                backdropUrl: details.backdropUrl,
+                voteAverage: details.voteAverage,
+                moodTags: details.moodTags || [],
+              },
             });
           }
         }
       }
       if (titleDoc) {
-        finalTitleId = titleDoc._id;
+        finalTitleId = titleDoc.id;
       }
     } else if (finalTitleId) {
-      // If finalTitleId is not a MongoDB ObjectId (e.g. numeric ID or tmdbId string)
-      if (
-        typeof finalTitleId === 'number' ||
-        (!finalTitleId.toString().match(/^[0-9a-fA-F]{24}$/) && !isNaN(Number(finalTitleId)))
-      ) {
-        let titleDoc = await Title.findOne({ tmdbId: Number(finalTitleId) });
-        if (!titleDoc && titleData) {
-          titleDoc = await Title.create({
-            name: titleData.name || titleData.title,
-            type: titleData.type || 'film',
-            tmdbId: Number(finalTitleId),
-            releaseYear: titleData.releaseYear,
-            runtimeMinutes: titleData.runtimeMinutes,
-            genres: titleData.genres || [],
-            overview: titleData.overview,
-            posterUrl: titleData.posterUrl,
-            backdropUrl: titleData.backdropUrl,
-            voteAverage: titleData.voteAverage || 7.5,
-          });
-        }
+      // Check if it's numeric tmdbId
+      if (!isNaN(Number(finalTitleId)) && !String(finalTitleId).includes('-')) {
+        const titleDoc = await prisma.title.findUnique({ where: { tmdbId: Number(finalTitleId) } });
         if (titleDoc) {
-          finalTitleId = titleDoc._id;
+          finalTitleId = titleDoc.id;
         }
       }
     }
@@ -392,17 +369,20 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
       return next(new AppError('Valid titleId or tmdbId is required', 400));
     }
 
-    // Atomic $addToSet for shortlist items as well
-    await Session.findByIdAndUpdate(sessionId, {
-      $addToSet: { shortlist: finalTitleId },
-    });
+    // Add to shortlistIds array if not present
+    if (!session.shortlistIds.includes(finalTitleId)) {
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: {
+          shortlistIds: [...session.shortlistIds, finalTitleId],
+        },
+      });
+    }
 
     const populatedSession = await getPopulatedSession(sessionId);
     sanitizeSessionPeople(populatedSession);
 
-    const votes = await Vote.find({ session: sessionId })
-      .populate('user', 'name email avatar')
-      .lean();
+    const votes = await SessionService.getVotes(sessionId);
 
     sendSuccess(
       res,
@@ -425,8 +405,9 @@ export const removeTitleFromShortlist = async (req: IAuthRequest, res: Response,
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { sessionId, titleId } = req.params;
-    const session = await Session.findById(sessionId);
+    const sessionId = String(req.params.sessionId);
+    const titleId = String(req.params.titleId);
+    const session = await prisma.session.findUnique({ where: { id: sessionId } });
     if (!session) {
       return next(new AppError('Session room not found', 404));
     }
@@ -435,14 +416,15 @@ export const removeTitleFromShortlist = async (req: IAuthRequest, res: Response,
       return next(new AppError('Cannot modify a closed session', 400));
     }
 
-    // Removing a candidate is more destructive than adding one, so it is
-    // host-only. Previously any authenticated user could strip any room.
     if (!SessionService.isHost(session, userId)) {
       return next(new AppError('Only the room host can remove candidates', 403));
     }
 
-    await Session.findByIdAndUpdate(sessionId, {
-      $pull: { shortlist: titleId },
+    await prisma.session.update({
+      where: { id: sessionId },
+      data: {
+        shortlistIds: session.shortlistIds.filter((id) => id !== titleId),
+      },
     });
 
     const populatedSession = await getPopulatedSession(sessionId);
@@ -477,8 +459,6 @@ export const submitVote = async (req: IAuthRequest, res: Response, next: NextFun
         strength,
       });
 
-      // Push the new tally to every connected participant immediately instead of
-      // making them wait for the next poll.
       SocketService.emitToSession(sessionId, 'vote:updated', { sessionId, votes, vote });
 
       sendSuccess(res, { vote, votes }, 'Vote recorded successfully');
@@ -504,10 +484,8 @@ export const lockSessionPick = async (req: IAuthRequest, res: Response, next: Ne
     const sessionId = String(req.params.sessionId);
 
     try {
-      // Shared with the socket path so both produce identical state and rules.
       const result = await SessionService.finalize(sessionId, userId);
 
-      // Announce the result to every connected participant immediately.
       SocketService.emitToSession(sessionId, 'session:finalized', result);
 
       sendSuccess(

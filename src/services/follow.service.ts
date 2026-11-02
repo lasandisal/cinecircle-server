@@ -1,5 +1,4 @@
-import mongoose from 'mongoose';
-import { Follow, User } from '../models';
+import prisma from '../config/prisma';
 
 export class FollowError extends Error {
   statusCode: number;
@@ -27,10 +26,9 @@ export interface ConnectionGraph {
   mutuals: any[];
 }
 
-const PUBLIC_FIELDS = 'name handle avatar bio role';
-
 const personCard = (u: any) => ({
-  id: u._id.toString(),
+  id: u.id,
+  _id: u.id,
   name: u.name,
   handle: u.handle || `@${(u.email?.split('@')[0] || u.name || '').toLowerCase().replace(/\s+/g, '')}`,
   avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name || 'U')}&background=6366f1&color=fff`,
@@ -38,49 +36,43 @@ const personCard = (u: any) => ({
   role: u.role,
 });
 
-/**
- * The social graph.
- *
- * Previously all of this was inline in the controller and there was no notion of
- * a two-way relationship at all - "mutual" elsewhere in the app always meant
- * mutual *watched titles*, which is a completely different idea and was easy to
- * confuse with mutual connections.
- */
 export class FollowService {
   /**
-   * Toggle a follow edge.
-   *
-   * Adds the validation the original handler lacked: a self-follow guard, a
-   * malformed-id check, and an existence check on the target. Without these you
-   * could follow yourself (inflating your own follower count) or write a
-   * dangling reference to a non-existent user.
+   * Toggle a follow edge with validation
    */
   public static async toggle(followerId: string, targetUserId: string): Promise<Relationship> {
-    if (!mongoose.Types.ObjectId.isValid(followerId) || !mongoose.Types.ObjectId.isValid(targetUserId)) {
+    if (!followerId || !targetUserId) {
       throw new FollowError('Invalid user id', 400);
     }
     if (followerId === targetUserId) {
       throw new FollowError('You cannot follow yourself', 400);
     }
 
-    const target = await User.findById(targetUserId).select('_id').lean();
+    const target = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true },
+    });
     if (!target) {
       throw new FollowError('That member no longer exists', 404);
     }
 
-    const existing = await Follow.findOne({
-      follower: followerId,
-      followedType: 'user',
-      followedUser: targetUserId,
+    const existing = await prisma.follow.findFirst({
+      where: {
+        followerId,
+        followedType: 'user',
+        followedUserId: targetUserId,
+      },
     });
 
     if (existing) {
-      await Follow.deleteOne({ _id: existing._id });
+      await prisma.follow.delete({ where: { id: existing.id } });
     } else {
-      await Follow.create({
-        follower: followerId,
-        followedType: 'user',
-        followedUser: targetUserId,
+      await prisma.follow.create({
+        data: {
+          followerId,
+          followedType: 'user',
+          followedUserId: targetUserId,
+        },
       });
     }
 
@@ -88,8 +80,7 @@ export class FollowService {
   }
 
   /**
-   * Relationship of the viewer to one specific member.
-   * Both directions are resolved in a single query.
+   * Relationship of the viewer to one specific member
    */
   public static async getRelationship(
     viewerId: string | undefined,
@@ -104,21 +95,22 @@ export class FollowService {
       };
     }
 
-    const edges = await Follow.find({
-      followedType: 'user',
-      $or: [
-        { follower: viewerId, followedUser: targetUserId },
-        { follower: targetUserId, followedUser: viewerId },
-      ],
-    })
-      .select('follower followedUser')
-      .lean();
+    const edges = await prisma.follow.findMany({
+      where: {
+        followedType: 'user',
+        OR: [
+          { followerId: viewerId, followedUserId: targetUserId },
+          { followerId: targetUserId, followedUserId: viewerId },
+        ],
+      },
+      select: { followerId: true, followedUserId: true },
+    });
 
     const isFollowing = edges.some(
-      (e: any) => e.follower.toString() === viewerId && e.followedUser.toString() === targetUserId
+      (e) => e.followerId === viewerId && e.followedUserId === targetUserId
     );
     const isFollowedBy = edges.some(
-      (e: any) => e.follower.toString() === targetUserId && e.followedUser.toString() === viewerId
+      (e) => e.followerId === targetUserId && e.followedUserId === viewerId
     );
 
     return { viewerId, isFollowing, isFollowedBy, isMutual: isFollowing && isFollowedBy };
@@ -126,42 +118,49 @@ export class FollowService {
 
   /** Ids of everyone the user follows (user-follow edges only). */
   public static async getFollowingIds(userId: string): Promise<string[]> {
-    if (!mongoose.Types.ObjectId.isValid(userId)) return [];
-    const rows = await Follow.find({ follower: userId, followedType: 'user' })
-      .select('followedUser')
-      .lean();
-    return rows.map((r: any) => r.followedUser?.toString()).filter(Boolean);
+    if (!userId) return [];
+    const rows = await prisma.follow.findMany({
+      where: { followerId: userId, followedType: 'user' },
+      select: { followedUserId: true },
+    });
+    return rows.map((r) => r.followedUserId).filter((id): id is string => Boolean(id));
   }
 
   /**
    * Full two-way graph: who I follow, who follows me, and the intersection
-   * (real connections).
    */
   public static async getGraph(userId: string): Promise<ConnectionGraph> {
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!userId) {
       return { following: [], followers: [], mutuals: [] };
     }
 
     const [followingRows, followerRows] = await Promise.all([
-      Follow.find({ follower: userId, followedType: 'user' }).select('followedUser').lean(),
-      Follow.find({ followedType: 'user', followedUser: userId }).select('follower').lean(),
+      prisma.follow.findMany({
+        where: { followerId: userId, followedType: 'user' },
+        select: { followedUserId: true },
+      }),
+      prisma.follow.findMany({
+        where: { followedType: 'user', followedUserId: userId },
+        select: { followerId: true },
+      }),
     ]);
 
     const followingIds = followingRows
-      .map((r: any) => r.followedUser?.toString())
-      .filter(Boolean);
-    const followerIds = followerRows.map((r: any) => r.follower?.toString()).filter(Boolean);
+      .map((r) => r.followedUserId)
+      .filter((id): id is string => Boolean(id));
+    const followerIds = followerRows.map((r) => r.followerId).filter(Boolean);
 
-    // Intersection = a two-way edge.
     const followingSet = new Set(followingIds);
     const mutualIds = followerIds.filter((id) => followingSet.has(id));
 
-    // One query for every referenced user, not one per id.
     const allIds = Array.from(new Set([...followingIds, ...followerIds]));
     const users = allIds.length
-      ? await User.find({ _id: { $in: allIds } }).select(`${PUBLIC_FIELDS} email`).lean()
+      ? await prisma.user.findMany({
+          where: { id: { in: allIds } },
+          select: { id: true, name: true, handle: true, avatar: true, bio: true, role: true, email: true },
+        })
       : [];
-    const byId = new Map(users.map((u: any) => [u._id.toString(), u]));
+    const byId = new Map(users.map((u) => [u.id, u]));
 
     const cardsFor = (ids: string[]) =>
       ids
@@ -178,35 +177,36 @@ export class FollowService {
   }
 
   /**
-   * Counted graph, used for profile stats.
-   *
-   * Both directions are filtered by `followedType: 'user'` so the two numbers
-   * can never disagree the way the previous pair of countDocuments calls did
-   * (one filtered, one not).
+   * Counted graph, used for profile stats
    */
   public static async getCounts(userId: string): Promise<{
     followingCount: number;
     followersCount: number;
     mutualConnectionsCount: number;
   }> {
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!userId) {
       return { followingCount: 0, followersCount: 0, mutualConnectionsCount: 0 };
     }
 
     const [followingCount, followersCount] = await Promise.all([
-      Follow.countDocuments({ follower: userId, followedType: 'user' }),
-      Follow.countDocuments({ followedType: 'user', followedUser: userId }),
+      prisma.follow.count({
+        where: { followerId: userId, followedType: 'user' },
+      }),
+      prisma.follow.count({
+        where: { followedType: 'user', followedUserId: userId },
+      }),
     ]);
 
     let mutualConnectionsCount = 0;
     if (followingCount > 0 && followersCount > 0) {
-      const [followingIds, followerIds] = await Promise.all([
+      const [followingIds, followerRows] = await Promise.all([
         this.getFollowingIds(userId),
-        Follow.find({ followedType: 'user', followedUser: userId })
-          .select('follower')
-          .lean()
-          .then((rows) => rows.map((r: any) => r.follower?.toString()).filter(Boolean)),
+        prisma.follow.findMany({
+          where: { followedType: 'user', followedUserId: userId },
+          select: { followerId: true },
+        }),
       ]);
+      const followerIds = followerRows.map((r) => r.followerId);
       const set = new Set(followingIds);
       mutualConnectionsCount = followerIds.filter((id) => set.has(id)).length;
     }

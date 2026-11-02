@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { User, TasteProfile, Otp } from '../models';
+import prisma from '../config/prisma';
 import { ENV } from '../config/env';
 import { IAuthRequest } from '../types';
 import { AppError } from '../middleware/error.middleware';
@@ -15,6 +15,33 @@ const generateToken = (id: string, email: string, role: string): string => {
   return jwt.sign({ id, email, role }, ENV.JWT_SECRET, {
     expiresIn: (ENV.JWT_EXPIRES_IN || '7d') as any,
   });
+};
+
+/**
+ * Format user for API responses (providing both id and _id for backwards compatibility)
+ */
+export const formatUserResponse = (user: any) => {
+  const onboarded = Boolean(
+    user.onboarded ||
+    (user.tasteProfile && Array.isArray(user.tasteProfile.favoriteGenres) && user.tasteProfile.favoriteGenres.length > 0)
+  );
+
+  return {
+    id: user.id,
+    _id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    avatar: user.avatar,
+    handle: user.handle,
+    bio: user.bio,
+    subscribedServices: user.subscribedServices || [],
+    fatigueCount: user.fatigueCount || 0,
+    tasteProfile: user.tasteProfile || null,
+    onboarded,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
 };
 
 /**
@@ -37,19 +64,23 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
     }
 
     if (type === 'register') {
-      const existing = await User.findOne({ email: cleanEmail });
+      const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
       if (existing) {
         return next(new AppError('An account with this email already exists.', 409));
       }
     } else if (type === 'login') {
-      const existing = await User.findOne({ email: cleanEmail });
+      const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
       if (!existing) {
         return next(new AppError('No account found with this email.', 404));
       }
     }
 
     // Rate limiting: enforce a 30s cooldown between code dispatches
-    const existingOtp = await Otp.findOne({ email: cleanEmail });
+    const existingOtp = await prisma.otp.findFirst({
+      where: { email: cleanEmail },
+      orderBy: { createdAt: 'desc' },
+    });
+
     if (existingOtp) {
       const elapsedMs = Date.now() - new Date(existingOtp.createdAt).getTime();
       if (elapsedMs < 30000) {
@@ -63,18 +94,17 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
     const salt = await bcrypt.genSalt(10);
     const otpHash = await bcrypt.hash(plainOtp, salt);
 
-    await Otp.findOneAndUpdate(
-      { email: cleanEmail },
-      {
+    // Clean previous codes for this email and insert new code
+    await prisma.otp.deleteMany({ where: { email: cleanEmail } });
+    await prisma.otp.create({
+      data: {
         email: cleanEmail,
         otpHash,
         type,
         verified: false,
         attempts: 0,
-        createdAt: new Date(),
       },
-      { upsert: true, new: true }
-    );
+    });
 
     const emailResult = await EmailService.sendVerificationOtp(cleanEmail, plainOtp, type as any);
 
@@ -105,7 +135,10 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const record = await Otp.findOne({ email: cleanEmail });
+    const record = await prisma.otp.findFirst({
+      where: { email: cleanEmail },
+      orderBy: { createdAt: 'desc' },
+    });
 
     if (!record) {
       return next(
@@ -114,19 +147,23 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
     }
 
     if (record.attempts >= 5) {
-      await Otp.deleteOne({ email: cleanEmail });
+      await prisma.otp.deleteMany({ where: { email: cleanEmail } });
       return next(new AppError('Too many failed attempts. Please request a new verification code.', 429));
     }
 
     const isMatch = await bcrypt.compare(String(otp).trim(), record.otpHash);
     if (!isMatch) {
-      record.attempts += 1;
-      await record.save();
+      await prisma.otp.update({
+        where: { id: record.id },
+        data: { attempts: record.attempts + 1 },
+      });
       return next(new AppError('Invalid verification code. Please check your email and try again.', 400));
     }
 
-    record.verified = true;
-    await record.save();
+    await prisma.otp.update({
+      where: { id: record.id },
+      data: { verified: true },
+    });
 
     sendSuccess(res, { verified: true, email: cleanEmail }, 'Email verified successfully.');
   } catch (error) {
@@ -140,7 +177,6 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
  */
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // `role` is intentionally NOT destructured from the body - see below.
     const { name, email, password, otp } = req.body;
 
     if (!name || !email || !password) {
@@ -158,13 +194,17 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return next(new AppError('Please provide a valid email address.', 400));
     }
 
-    const existingUser = await User.findOne({ email: cleanEmail });
+    const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (existingUser) {
       return next(new AppError('An account with this email already exists.', 409));
     }
 
     // Verify OTP requirement
-    const otpRecord = await Otp.findOne({ email: cleanEmail });
+    const otpRecord = await prisma.otp.findFirst({
+      where: { email: cleanEmail },
+      orderBy: { createdAt: 'desc' },
+    });
+
     if (!otpRecord) {
       return next(new AppError('Email verification required. Please request a verification code.', 400));
     }
@@ -179,54 +219,40 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     }
 
     // Clean up OTP record upon successful registration
-    await Otp.deleteOne({ email: cleanEmail });
+    await prisma.otp.deleteMany({ where: { email: cleanEmail } });
 
     // Hash password with bcryptjs
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Create user.
-    // The role is ALWAYS 'user' here. Previously this honoured a `role` field
-    // from the request body, so `POST /api/auth/register` with
-    // {"role":"admin"} produced an admin account, which then unlocked
-    // /api/curator/comments/* (moderation powers).
-    const user = new User({
-      name: name.trim(),
-      email: cleanEmail,
-      passwordHash,
-      role: 'user',
-      subscribedServices: [],
-      fatigueCount: 0,
+    // Create user and initialize tasteProfile
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: cleanEmail,
+        passwordHash,
+        role: 'user',
+        subscribedServices: [],
+        fatigueCount: 0,
+        tasteProfile: {
+          create: {
+            favoriteGenres: [],
+            favoriteTitleIds: [],
+            exclusions: [],
+          },
+        },
+      },
+      include: {
+        tasteProfile: true,
+      },
     });
 
-    await user.save();
-
-    // Automatically initialize linked TasteProfile for onboarding
-    const tasteProfile = await TasteProfile.create({
-      user: user._id,
-      favoriteGenres: [],
-      favoriteTitles: [],
-      exclusions: [],
-    });
-
-    user.tasteProfile = tasteProfile._id;
-    await user.save();
-
-    const token = generateToken(user._id.toString(), user.email, user.role);
+    const token = generateToken(user.id, user.email, user.role);
 
     sendSuccess(
       res,
       {
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          subscribedServices: user.subscribedServices,
-          fatigueCount: user.fatigueCount,
-          tasteProfile: user.tasteProfile,
-          onboarded: false,
-        },
+        user: formatUserResponse(user),
         token,
       },
       'User registered and email verified successfully.',
@@ -250,14 +276,22 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail }).populate('tasteProfile');
+    const user = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+      include: { tasteProfile: true },
+    });
+
     if (!user) {
       return next(new AppError('Invalid email or credentials.', 401));
     }
 
     if (otp) {
       // OTP passwordless verification
-      const otpRecord = await Otp.findOne({ email: cleanEmail, type: 'login' });
+      const otpRecord = await prisma.otp.findFirst({
+        where: { email: cleanEmail, type: 'login' },
+        orderBy: { createdAt: 'desc' },
+      });
+
       if (!otpRecord) {
         return next(new AppError('Verification code has expired. Please request a new code.', 400));
       }
@@ -265,7 +299,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       if (!isOtpMatch) {
         return next(new AppError('Invalid verification code.', 400));
       }
-      await Otp.deleteOne({ email: cleanEmail });
+      await prisma.otp.deleteMany({ where: { email: cleanEmail } });
     } else {
       const isMatch = await bcrypt.compare(password, user.passwordHash);
       if (!isMatch) {
@@ -273,21 +307,12 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       }
     }
 
-    const token = generateToken(user._id.toString(), user.email, user.role);
+    const token = generateToken(user.id, user.email, user.role);
 
     sendSuccess(
       res,
       {
-        user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          subscribedServices: user.subscribedServices,
-          fatigueCount: user.fatigueCount,
-          tasteProfile: user.tasteProfile,
-          onboarded: Boolean(user.onboarded || ((user.tasteProfile as any)?.favoriteGenres?.length > 0)),
-        },
+        user: formatUserResponse(user),
         token,
       },
       'Login successful.'
@@ -307,18 +332,16 @@ export const getMe = async (req: IAuthRequest, res: Response, next: NextFunction
       return next(new AppError('Unauthorized.', 401));
     }
 
-    const user = await User.findById(req.user.id)
-      .select('-passwordHash')
-      .populate('tasteProfile');
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { tasteProfile: true },
+    });
 
     if (!user) {
       return next(new AppError('User not found.', 404));
     }
 
-    const userObj = user.toObject();
-    const onboarded = Boolean(user.onboarded || ((userObj.tasteProfile as any)?.favoriteGenres?.length > 0));
-
-    sendSuccess(res, { user: { ...userObj, onboarded } }, 'Current user retrieved successfully.');
+    sendSuccess(res, { user: formatUserResponse(user) }, 'Current user retrieved successfully.');
   } catch (error) {
     next(error);
   }
@@ -334,12 +357,15 @@ export const refreshToken = async (req: IAuthRequest, res: Response, next: NextF
       return next(new AppError('Unauthorized.', 401));
     }
 
-    const user = await User.findById(req.user.id);
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+    });
+
     if (!user) {
       return next(new AppError('User not found.', 404));
     }
 
-    const newToken = generateToken(user._id.toString(), user.email, user.role);
+    const newToken = generateToken(user.id, user.email, user.role);
 
     sendSuccess(res, { token: newToken }, 'Token refreshed successfully.');
   } catch (error) {

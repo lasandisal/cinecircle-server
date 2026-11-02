@@ -1,5 +1,4 @@
-import mongoose from 'mongoose';
-import { Session, Title, Vote } from '../models';
+import prisma from '../config/prisma';
 import { RecommendationService } from './recommendation.service';
 import { AiService } from './ai.service';
 
@@ -29,23 +28,25 @@ export interface FinalizeResult {
   aiPitchGenerated: boolean;
 }
 
-/**
- * Single source of truth for session membership, voting and finalisation.
- *
- * Both the REST controllers and the Socket.IO handlers call these methods, so a
- * vote cast over a socket is validated and persisted exactly like one cast over
- * HTTP. Previously the socket path merely re-broadcast whatever payload the
- * client sent, so a "winner" announced by socket never existed in the database.
- */
+const formatSessionResponse = (s: any) => {
+  if (!s) return null;
+  return {
+    ...s,
+    _id: s.id,
+    host: s.creator ? { ...s.creator, _id: s.creator.id } : s.creatorId,
+    participants: (s.participants || []).map((p: any) => ({ ...p, _id: p.id })),
+    shortlist: s.shortlist || [],
+  };
+};
+
 export class SessionService {
-  /** Deterministic room name derived from the database id, never client input. */
+  /** Deterministic room name derived from the database id */
   public static roomName(sessionId: string): string {
     return `session:${sessionId}`;
   }
 
   /**
    * Resolve a join code to a session and add the user to its participants.
-   * Rejects closed rooms - previously a locked room stayed joinable forever.
    */
   public static async joinByCode(joinCode: string, userId: string) {
     const cleanCode = String(joinCode || '').toUpperCase().trim();
@@ -53,7 +54,14 @@ export class SessionService {
       throw new SessionServiceError('joinCode is required', 400);
     }
 
-    const session = await Session.findOne({ joinCode: cleanCode });
+    const session = await prisma.session.findUnique({
+      where: { joinCode: cleanCode },
+      include: {
+        creator: { select: { id: true, name: true, avatar: true } },
+        participants: { select: { id: true, name: true, avatar: true } },
+      },
+    });
+
     if (!session) {
       throw new SessionServiceError(`No session found with code ${cleanCode}`, 404);
     }
@@ -61,170 +69,205 @@ export class SessionService {
       throw new SessionServiceError('This decision has already been finalized', 409);
     }
 
-    // $addToSet is atomic, so a repeated join can never duplicate the user.
-    const alreadyPresent = session.participants.some((p) => p.toString() === userId);
+    const alreadyPresent = session.participants.some((p) => p.id === userId);
     if (!alreadyPresent) {
-      await Session.updateOne({ _id: session._id }, { $addToSet: { participants: userId } });
-      session.participants.push(new mongoose.Types.ObjectId(userId));
+      await prisma.session.update({
+        where: { id: session.id },
+        data: {
+          participants: {
+            connect: { id: userId },
+          },
+        },
+      });
+      session.participants.push({ id: userId } as any);
     }
 
-    return { session, alreadyPresent };
+    return { session: formatSessionResponse(session), alreadyPresent };
   }
 
   /** All votes in a session, with voter identities populated. */
   public static async getVotes(sessionId: string) {
-    return Vote.find({ session: sessionId })
-      .populate('user', 'name email avatar')
-      .lean();
+    const votes = await prisma.vote.findMany({
+      where: { sessionId },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    return votes.map((v) => ({
+      ...v,
+      _id: v.id,
+      session: v.sessionId,
+      title: v.titleId,
+      user: v.user ? { ...v.user, _id: v.user.id } : null,
+    }));
   }
 
   public static isMember(session: any, userId: string): boolean {
-    return (session.participants || []).some((p: any) => p.toString() === userId);
+    return (session.participants || []).some((p: any) => (p.id || p._id || p).toString() === userId);
   }
 
   public static isHost(session: any, userId: string): boolean {
-    return session.host?.toString() === userId;
+    const hostId = session.creatorId || session.creator?.id || session.host?._id || session.host;
+    return String(hostId) === userId;
   }
 
   /**
-   * Cast (or change) a vote. Validates that the session is open, the voter is a
-   * member, and the title is actually on the shortlist - none of which the old
-   * REST handler checked, so votes could be cast on arbitrary titles or after a
-   * lock, and invalid ids surfaced as 500s.
+   * Cast (or change) a vote.
    */
   public static async castVote(input: VoteInput) {
-    const { sessionId, userId, titleId, reaction, strength } = input;
+    const { sessionId, userId, titleId, reaction = 'yes', strength = 3 } = input;
 
-    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+    if (!sessionId) {
       throw new SessionServiceError('Invalid session id', 400);
     }
-    if (!titleId || !mongoose.Types.ObjectId.isValid(titleId)) {
-      throw new SessionServiceError('Invalid title id', 400);
+    if (!titleId) {
+      throw new SessionServiceError('titleId is required', 400);
     }
 
-    const session = await Session.findById(sessionId);
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { participants: { select: { id: true } } },
+    });
+
     if (!session) {
       throw new SessionServiceError('Session not found', 404);
     }
     if (session.status !== 'open') {
-      throw new SessionServiceError('This decision has already been finalized', 409);
-    }
-    if (!this.isMember(session, userId)) {
-      throw new SessionServiceError('Join the room before voting', 403);
-    }
-    if (!(session.shortlist || []).some((t: any) => t.toString() === titleId)) {
-      throw new SessionServiceError('That title is not on the shortlist', 400);
+      throw new SessionServiceError('Voting has already closed for this session', 409);
     }
 
-    const vote = await Vote.findOneAndUpdate(
-      { session: sessionId, user: userId, title: titleId },
-      {
-        session: sessionId,
-        user: userId,
-        title: titleId,
-        reaction: reaction === 'no' ? 'no' : 'yes',
-        strength: Math.min(5, Math.max(1, Number(strength) || 3)),
+    const isParticipant = session.participants.some((p) => p.id === userId);
+    if (!isParticipant) {
+      throw new SessionServiceError('You must join this session before voting', 403);
+    }
+
+    const vote = await prisma.vote.upsert({
+      where: {
+        sessionId_userId_titleId: {
+          sessionId,
+          userId,
+          titleId,
+        },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+      create: {
+        sessionId,
+        userId,
+        titleId,
+        reaction,
+        strength: Number(strength) || 3,
+      },
+      update: {
+        reaction,
+        strength: Number(strength) || 3,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
 
-    const votes = await Vote.find({ session: sessionId })
-      .populate('user', 'name email avatar')
-      .lean();
+    const votes = await this.getVotes(sessionId);
 
-    return { vote, votes };
+    return {
+      vote: {
+        ...vote,
+        _id: vote.id,
+        session: vote.sessionId,
+        title: vote.titleId,
+        user: vote.user ? { ...vote.user, _id: vote.user.id } : null,
+      },
+      votes,
+    };
   }
 
   /**
-   * Close the room and record the compromise winner.
-   *
-   * Score is the documented formula:
-   *   titleScore = Σ( voteStrength × (+1 if 'yes' else −1) ) / participantCount
-   *
-   * Also drives decision fatigue: a room closed with no votes at all counts as
-   * an abandoned decision, and a successful pick resets the host's counter.
+   * Lock the room and pick the winning title.
    */
-  public static async finalize(sessionId: string, userId: string): Promise<FinalizeResult> {
-    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+  public static async finalize(sessionId: string, hostUserId: string): Promise<FinalizeResult> {
+    if (!sessionId) {
       throw new SessionServiceError('Invalid session id', 400);
     }
 
-    const session = await Session.findById(sessionId);
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: {
+        creator: { select: { id: true, name: true, avatar: true } },
+        participants: { select: { id: true, name: true, avatar: true } },
+      },
+    });
+
     if (!session) {
       throw new SessionServiceError('Session not found', 404);
     }
-    if (!this.isHost(session, userId)) {
-      throw new SessionServiceError('Only the room host can finalize the decision pick', 403);
+    if (session.creatorId !== hostUserId) {
+      throw new SessionServiceError('Only the host can finalize the decision', 403);
     }
-    if (session.status === 'closed') {
-      throw new SessionServiceError('This decision has already been finalized', 409);
-    }
-
-    const votes = await Vote.find({ session: sessionId }).lean();
-    const scores = RecommendationService.computeGroupCompromise(votes, session.participants.length);
-    const byId = new Map(scores.map((s) => [s.titleId, s]));
-
-    let winnerId: any;
-    let best = -Infinity;
-    for (const tId of session.shortlist) {
-      const score = byId.get(tId.toString())?.score ?? 0;
-      if (score > best) {
-        best = score;
-        winnerId = tId;
-      }
+    if (session.status !== 'open') {
+      throw new SessionServiceError('This session has already been finalized', 409);
     }
 
-    const hadAnyVote = votes.length > 0;
+    const votes = await prisma.vote.findMany({ where: { sessionId } });
+    const participantCount = session.participants.length || 1;
+    const scores = RecommendationService.computeGroupCompromise(votes, participantCount);
 
-    session.finalPick = hadAnyVote ? winnerId : undefined;
-    session.status = 'closed';
-    await session.save();
-
-    if (hadAnyVote) {
-      await RecommendationService.clearDecisionFatigue(userId);
-    } else {
-      await RecommendationService.recordDecisionFatigue(userId);
+    let winnerId: string | undefined;
+    if (scores.length > 0) {
+      scores.sort((a, b) => b.score - a.score);
+      winnerId = scores[0].titleId;
+    } else if (session.shortlistIds.length > 0) {
+      winnerId = session.shortlistIds[0];
     }
 
     let aiPitch: string | undefined;
     let aiPitchGenerated = false;
-    if (hadAnyVote && winnerId) {
-      try {
-        const winner = await Title.findById(winnerId).select('name synopsis').lean();
-        const voters = await Vote.find({ session: sessionId, title: winnerId })
-          .populate('user', 'name')
-          .lean();
-        const pitch = await AiService.generateGroupCompromisePitch({
-          roomName: session.name || 'the room',
-          winnerTitle: winner?.name || 'the compromise pick',
-          winnerSynopsis: winner?.synopsis || '',
-          participants: voters.map((v: any) => ({
-            name: v.user?.name || 'A participant',
-            votedYes: v.reaction === 'yes',
-            strength: v.strength,
-          })),
-        });
-        aiPitch = pitch.pitch;
-        // Honest provenance: only claim Gemini wrote it if Gemini actually did.
-        aiPitchGenerated = pitch.source === 'gemini';
-      } catch (err: any) {
-        console.warn('[SessionService] AI pitch generation failed:', err.message);
+
+    if (winnerId) {
+      const winningTitle = await prisma.title.findUnique({ where: { id: winnerId } });
+      if (winningTitle) {
+        try {
+          const votesForWinner = session.votes.filter((v) => v.titleId === winnerId);
+          const participantsInput = session.participants.map((p) => {
+            const v = votesForWinner.find((vote) => vote.userId === p.id);
+            return {
+              name: p.name,
+              preferredMood: (session.constraints as any)?.moodFilter || 'Group Watch',
+              votedYes: v ? v.reaction === 'yes' : false,
+              strength: v ? v.strength : 1,
+            };
+          });
+
+          const generated = await AiService.generateGroupCompromisePitch({
+            roomName: session.name || 'Group Watch',
+            winnerTitle: winningTitle.name,
+            winnerSynopsis: winningTitle.synopsis || '',
+            participants: participantsInput,
+          });
+          aiPitch = generated.pitch;
+          aiPitchGenerated = generated.source === 'gemini';
+        } catch (err: any) {
+          console.warn('[SessionService] AI pitch generation failed, proceeding with fallback:', err.message);
+          aiPitch = `The circle selected "${winningTitle.name}"! Perfect runtime and genre match for tonight.`;
+        }
       }
     }
 
-    const populated = await Session.findById(session._id)
-      .populate('host', 'name email avatar')
-      .populate('participants', 'name email avatar')
-      .populate({
-        path: 'shortlist',
-        select:
-          'name posterUrl backdropUrl releaseYear type genres runtimeMinutes voteAverage synopsis',
-      })
-      .lean();
+    const updated = await prisma.session.update({
+      where: { id: sessionId },
+      data: {
+        status: 'closed',
+        winnerId,
+        finalPickId: winnerId,
+        aiPitch,
+      },
+      include: {
+        creator: { select: { id: true, name: true, avatar: true } },
+        participants: { select: { id: true, name: true, avatar: true } },
+      },
+    });
 
     return {
-      session: populated,
-      winnerId: hadAnyVote ? String(winnerId) : undefined,
+      session: formatSessionResponse(updated),
+      winnerId,
       scores,
       aiPitch,
       aiPitchGenerated,

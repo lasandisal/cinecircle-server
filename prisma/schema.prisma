@@ -1,0 +1,245 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  email              String   @unique
+  passwordHash       String
+  name               String
+  role               String   @default("user") // "user" | "curator" | "admin"
+  avatar             String?
+  handle             String?
+  bio                String   @default("")
+  subscribedServices String[]
+  fatigueCount       Int      @default(0)
+  onboarded          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tasteProfile     TasteProfile?
+  watchlists       Watchlist[]
+  watchHistories   WatchHistory[]
+  votes            Vote[]
+  comments         Comment[]
+  createdSessions  Session[]      @relation("CreatedSessions")
+  joinedSessions   Session[]      @relation("SessionParticipants")
+  following        Follow[]       @relation("UserFollowing")
+  followers        Follow[]       @relation("UserFollowers")
+  soundtracksAdded Soundtrack[]
+}
+
+model Title {
+  id             String   @id @default(uuid())
+  tmdbId         Int      @unique
+  name           String
+  originalName   String?
+  type           String // "movie" | "tv" | "film"
+  genres         String[]
+  synopsis       String
+  runtimeMinutes Int?
+  releaseYear    Int?
+  voteAverage    Float    @default(0.0)
+  posterUrl      String?
+  backdropUrl    String?
+  moodTags       String[]
+  cast           Json? // Array of { name, character, avatar }
+
+  providers      WatchProvider[]
+  soundtracks    Soundtrack[]
+  episodes       SeasonEpisode[]
+  comments       Comment[]
+  watchlistItems Watchlist[]
+  watchHistories WatchHistory[]
+  votes          Vote[]
+  follows        Follow[]
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  name         String   @default("Watch Decision Room")
+  joinCode     String   @unique
+  status       String   @default("open") // "open" | "closed"
+  winnerId     String?
+  finalPickId  String?
+  aiPitch      String?
+  constraints  Json?
+  shortlistIds String[] @default([])
+  creatorId    String
+  creator      User     @relation("CreatedSessions", fields: [creatorId], references: [id])
+  participants User[]   @relation("SessionParticipants")
+  votes        Vote[]
+  createdAt    DateTime @default(now())
+}
+
+model Vote {
+  id        String @id @default(uuid())
+  sessionId String
+  userId    String
+  titleId   String
+  reaction  String // "yes" | "no"
+  strength  Int    @default(1)
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title   Title   @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId, titleId])
+}
+
+model Watchlist {
+  id         String    @id @default(uuid())
+  userId     String
+  titleId    String
+  watched    Boolean   @default(false)
+  starRating Int?
+  addedAt    DateTime  @default(now())
+  watchedAt  DateTime?
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, titleId])
+}
+
+model WatchProvider {
+  id              String   @id @default(uuid())
+  titleId         String
+  service         String
+  region          String
+  type            String // "subscription" | "rental" | "purchase"
+  sourceUpdatedAt DateTime @default(now())
+
+  title Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@index([titleId])
+}
+
+model SeasonEpisode {
+  id              String    @id @default(uuid())
+  titleId         String
+  seasonNumber    Int
+  sourceUpdatedAt DateTime?
+  episodes        Json // Array of episodes [{ episodeNumber, name, summary, runtimeMinutes, etc. }]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  title Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@unique([titleId, seasonNumber])
+}
+
+model Soundtrack {
+  id              String   @id @default(uuid())
+  titleId         String
+  songName        String
+  artist          String
+  episodeRef      String?
+  popularityRank  Int      @default(0)
+  previewUrl      String?
+  albumArtUrl     String?
+  spotifyUrl      String?
+  addedById       String?
+  source          String   @default("user") // "curated" | "auto" | "user"
+  sourceUpdatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  title   Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  addedBy User? @relation(fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@index([titleId])
+}
+
+model TasteProfile {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  favoriteGenres   String[]
+  favoriteTitleIds String[]
+  exclusions       String[]
+  genreScores      Json? // Map of genre -> affinity score
+  tasteComputedAt  DateTime?
+  updatedAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WatchHistory {
+  id         String   @id @default(uuid())
+  userId     String
+  titleId    String
+  action     String // "watched" | "rated" | "skipped" | "picked"
+  rating     Int?
+  moodAtTime String?
+  timestamp  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([timestamp])
+}
+
+model Comment {
+  id               String    @id @default(uuid())
+  titleId          String
+  userId           String
+  text             String
+  rating           Int?
+  likesCount       Int       @default(0)
+  parentId         String?
+  reactions        Json? // [{ user, emoji }]
+  poll             Json? // { question, options: [{ optionText, votes }] }
+  containsSpoilers Boolean   @default(false)
+  reported         Boolean   @default(false)
+  hidden           Boolean   @default(false)
+  reports          Json? // [{ user, reason, createdAt }]
+  reportCount      Int       @default(0)
+  reportedAt       DateTime?
+  hiddenAt         DateTime?
+  hiddenBy         String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  title   Title     @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentReplies")
+
+  @@index([titleId])
+  @@index([reported])
+  @@index([hidden])
+}
+
+model Follow {
+  id              String   @id @default(uuid())
+  followerId      String
+  followedType    String // "user" | "title"
+  followedUserId  String?
+  followedTitleId String?
+  createdAt       DateTime @default(now())
+
+  follower      User   @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
+  followedUser  User?  @relation("UserFollowers", fields: [followedUserId], references: [id], onDelete: Cascade)
+  followedTitle Title? @relation(fields: [followedTitleId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followedType, followedUserId, followedTitleId])
+}
+
+model Otp {
+  id        String   @id @default(uuid())
+  email     String
+  otpHash   String
+  type      String   @default("register") // "register" | "login" | "reset"
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
