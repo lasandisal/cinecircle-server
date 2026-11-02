@@ -193,6 +193,7 @@ export class SessionService {
       include: {
         creator: { select: { id: true, name: true, avatar: true } },
         participants: { select: { id: true, name: true, avatar: true } },
+        votes: true, // Added to resolve property 'votes' does not exist error
       },
     });
 
@@ -225,9 +226,9 @@ export class SessionService {
       const winningTitle = await prisma.title.findUnique({ where: { id: winnerId } });
       if (winningTitle) {
         try {
-          const votesForWinner = session.votes.filter((v) => v.titleId === winnerId);
+          const votesForWinner = session.votes.filter((v: any) => v.titleId === winnerId);
           const participantsInput = session.participants.map((p) => {
-            const v = votesForWinner.find((vote) => vote.userId === p.id);
+            const v = votesForWinner.find((vote: any) => vote.userId === p.id);
             return {
               name: p.name,
               preferredMood: (session.constraints as any)?.moodFilter || 'Group Watch',
