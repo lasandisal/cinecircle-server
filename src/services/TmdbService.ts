@@ -115,15 +115,41 @@ class TmdbService {
     }
 
     try {
-      const endpoint = `${TMDB_BASE_URL}/trending/${mediaType}/week`;
-      const response = await axios.get(endpoint, this.getRequestConfig({ page }));
-
-      const rawResults = response.data.results || [];
-      return rawResults.map((item: any) => this.mapRawToFormatted(item));
+      return await this.fetchLiveTrending(mediaType, page);
     } catch (err: any) {
       console.warn('[TmdbService] TMDB API request failed, falling back to curated list:', err.message);
       return this.getFallbackTrending(mediaType);
     }
+  }
+
+  /**
+   * Fetch live "trending this week" results from TMDB.
+   *
+   * Unlike fetchTrending(), this never substitutes curated seed data: the
+   * caller can therefore tell whether a result is genuinely live. Throws when
+   * TMDB is not configured or the request fails.
+   */
+  public async fetchLiveTrending(
+    mediaType: 'movie' | 'tv' | 'all' = 'all',
+    page: number = 1
+  ): Promise<FormattedTmdbTitle[]> {
+    if (!this.hasApiKey()) {
+      throw new Error('TMDB API key is not configured');
+    }
+
+    const endpoint = `${TMDB_BASE_URL}/trending/${mediaType}/week`;
+    const response = await axios.get(endpoint, this.getRequestConfig({ page }));
+
+    const rawResults: any[] = response.data?.results || [];
+    return rawResults
+      // With mediaType=all TMDB mixes movies and TV; drop people/other kinds.
+      .filter(
+        (item) =>
+          item.media_type === 'movie' ||
+          item.media_type === 'tv' ||
+          (mediaType !== 'all' && (item.title || item.name))
+      )
+      .map((item: any) => this.mapRawToFormatted(item));
   }
 
   /**
@@ -430,9 +456,11 @@ class TmdbService {
       type: isMovie ? 'film' : 'tv',
       genres: genreNames.length > 0 ? genreNames : ['Drama'],
       synopsis: item.overview || '',
-      runtimeMinutes: isMovie ? 120 : 45,
+      // Trending/search payloads do not include runtime. 0 means "unknown"
+      // so the UI can omit it instead of displaying a fabricated value.
+      runtimeMinutes: 0,
       releaseYear,
-      voteAverage: Math.round((item.vote_average || 7.5) * 10) / 10,
+      voteAverage: Math.round((item.vote_average || 0) * 10) / 10,
       posterUrl: item.poster_path ? `${TMDB_IMAGE_BASE}${item.poster_path}` : '',
       backdropUrl: item.backdrop_path ? `${TMDB_BACKDROP_BASE}${item.backdrop_path}` : '',
       moodTags: this.generateMoodTags(genreNames),

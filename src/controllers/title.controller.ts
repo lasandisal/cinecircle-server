@@ -173,45 +173,93 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
 };
 
 /**
- * Get trending titles
+ * Get trending titles.
+ *
+ * Prefers live TMDB "trending this week" results so the section reflects what
+ * is actually popular right now. Falls back to the catalogue's top-rated
+ * titles when TMDB is not configured or unreachable, and the response says
+ * which source was used so the UI can label it honestly.
  */
+const TRENDING_CACHE_TTL_MS = 10 * 60 * 1000;
+const trendingCache = new Map<
+  string,
+  { at: number; titles: any[]; source: 'tmdb' | 'catalogue' }
+>();
+
 export const getTrendingTitles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { mediaType = 'all' } = req.query;
+    const cacheKey = String(mediaType);
 
-    const where: any = {};
-    if (mediaType === 'movie') where.type = 'film';
-    if (mediaType === 'tv') where.type = 'tv';
-
-    const dbTitles = await prisma.title.findMany({
-      where,
-      orderBy: [{ voteAverage: 'desc' }, { releaseYear: 'desc' }],
-      take: 12,
-    });
-
-    if (dbTitles.length > 0) {
-      const titleIds = dbTitles.map((t) => t.id);
-      const providers = await prisma.watchProvider.findMany({
-        where: { titleId: { in: titleIds } },
-      });
-      const providerMap = new Map<string, any[]>();
-      for (const p of providers) {
-        const key = p.titleId;
-        if (!providerMap.has(key)) providerMap.set(key, []);
-        providerMap.get(key)!.push({ ...p, _id: p.id });
-      }
-
-      const results = dbTitles.map((t) => ({
-        ...formatTitle(t),
-        watchProviders: providerMap.get(t.id) || [],
-      }));
-
-      sendSuccess(res, { titles: results }, 'Trending titles retrieved');
+    const cached = trendingCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < TRENDING_CACHE_TTL_MS) {
+      sendSuccess(res, { titles: cached.titles, source: cached.source }, 'Trending titles retrieved');
       return;
     }
 
-    const trending = await tmdbService.fetchTrending(mediaType as any);
-    sendSuccess(res, { titles: trending }, 'Trending titles retrieved from TMDB service');
+    let titles: any[] = [];
+    let source: 'tmdb' | 'catalogue' = 'catalogue';
+
+    // 1. Live TMDB trending (real data, refreshed weekly by TMDB).
+    if (tmdbService.hasApiKey()) {
+      try {
+        const live = await tmdbService.fetchLiveTrending(mediaType as any);
+        if (live.length > 0) {
+          const tmdbIds = live.map((t) => t.tmdbId);
+          const localRows = await prisma.title.findMany({
+            where: { tmdbId: { in: tmdbIds } },
+            select: { id: true, tmdbId: true },
+          });
+          const localByTmdbId = new Map(localRows.map((r) => [r.tmdbId, r.id]));
+
+          titles = live.slice(0, 12).map((t) => ({
+            ...t,
+            // Reuse the local catalogue row when one exists so links and
+            // community stats resolve without an extra TMDB round-trip.
+            _id: localByTmdbId.get(t.tmdbId) || undefined,
+            inCatalogue: localByTmdbId.has(t.tmdbId),
+          }));
+          source = 'tmdb';
+        }
+      } catch (err: any) {
+        console.warn('[Trending] Live TMDB trending unavailable:', err.message);
+      }
+    }
+
+    // 2. Fallback: top-rated titles already in the catalogue.
+    if (titles.length === 0) {
+      const where: any = {};
+      if (mediaType === 'movie') where.type = 'film';
+      if (mediaType === 'tv') where.type = 'tv';
+
+      const dbTitles = await prisma.title.findMany({
+        where,
+        orderBy: [{ voteAverage: 'desc' }, { releaseYear: 'desc' }],
+        take: 12,
+      });
+
+      if (dbTitles.length > 0) {
+        const titleIds = dbTitles.map((t) => t.id);
+        const providers = await prisma.watchProvider.findMany({
+          where: { titleId: { in: titleIds } },
+        });
+        const providerMap = new Map<string, any[]>();
+        for (const p of providers) {
+          const key = p.titleId;
+          if (!providerMap.has(key)) providerMap.set(key, []);
+          providerMap.get(key)!.push({ ...p, _id: p.id });
+        }
+
+        titles = dbTitles.map((t) => ({
+          ...formatTitle(t),
+          inCatalogue: true,
+          watchProviders: providerMap.get(t.id) || [],
+        }));
+      }
+    }
+
+    trendingCache.set(cacheKey, { at: Date.now(), titles, source });
+    sendSuccess(res, { titles, source }, 'Trending titles retrieved');
   } catch (error) {
     next(error);
   }

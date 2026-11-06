@@ -326,7 +326,7 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
               synopsis: titleData.synopsis || titleData.overview || '',
               posterUrl: titleData.posterUrl,
               backdropUrl: titleData.backdropUrl,
-              voteAverage: titleData.voteAverage || 7.5,
+              voteAverage: titleData.voteAverage ?? 0,
             },
           });
         } else if (tmdbService.hasApiKey()) {

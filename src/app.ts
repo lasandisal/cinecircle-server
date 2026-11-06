@@ -9,6 +9,10 @@ const app: Application = express();
 
 export const isAllowedOrigin = (origin: string | undefined): boolean => {
   if (!origin) return true;
+  // Local development servers may bind any port (5173, 5174, ...).
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return true;
+  }
   if (
     origin === 'http://localhost:5173' ||
     origin === 'http://localhost:5000' ||

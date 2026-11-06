@@ -49,7 +49,7 @@ export const SEED_TITLES: SeedTitleData[] = [
     releaseYear: 2024,
     voteAverage: 8.2,
     posterUrl: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s520b22.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/eZ239CUp1d6OryZEBPnO2n87gMG.jpg',
     moodTags: ['Cinematic Spectacle', 'Epic & Grand', 'High-Stakes', 'Philosophical'],
     cast: [
       { actorName: 'Timothée Chalamet', characterName: 'Paul Atreides', photoUrl: 'https://image.tmdb.org/t/p/w185/BE2sdjpgsa2rNTFa66f7upkaOP.jpg' },
@@ -128,8 +128,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 139,
     releaseYear: 2022,
     voteAverage: 8.0,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/w3LxiVYPqrlxqP9Ydr74-e8oFf.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/8ZfKj2.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/u68AjlvlutfEIcpmbYpKcdi09ut.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/fIwiFha3WPu5nHkBeMQ4GzEk0Hv.jpg',
     moodTags: ['Mind-Bending', 'Emotional', 'Witty & Sharp', 'Heartwarming'],
     cast: [
       { actorName: 'Michelle Yeoh', characterName: 'Evelyn Wang', photoUrl: 'https://image.tmdb.org/t/p/w185/iP6x7.jpg' },
@@ -154,7 +154,7 @@ export const SEED_TITLES: SeedTitleData[] = [
     releaseYear: 2016,
     voteAverage: 8.6,
     posterUrl: 'https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/56v2KjUmLeLoGqaVyt4xY.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/9P4IIMYY3HifqeruZq0ZZ9g7YUi.jpg',
     moodTags: ['Dark & Gritty', 'Nostalgic', 'Binge-Worthy', 'Spooky'],
     cast: [
       { actorName: 'Millie Bobby Brown', characterName: 'Eleven', photoUrl: 'https://image.tmdb.org/t/p/w185/yzp0K.jpg' },
@@ -216,8 +216,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 60,
     releaseYear: 2018,
     voteAverage: 8.6,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/7udWmr0.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/etj7E.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/d87JXX3DLkRJMfm5StCmmnmhHuX.jpg',
     moodTags: ['High-Stakes', 'Dark & Gritty', 'Witty & Sharp', 'Intense'],
     cast: [
       { actorName: 'Brian Cox', characterName: 'Logan Roy', photoUrl: 'https://image.tmdb.org/t/p/w185/7.jpg' },
@@ -252,8 +252,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 30,
     releaseYear: 2022,
     voteAverage: 8.3,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/s3bS57.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/mrg7V.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/eKfVzzEazSIjJMrw9ADa2x8ksLz.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/aJtG4txtmiRHwAAqENQHZvBs6kY.jpg',
     moodTags: ['Intense', 'Fast-Paced', 'Emotional', 'Heartwarming'],
     cast: [
       { actorName: 'Jeremy Allen White', characterName: 'Carmen "Carmy" Berzatto', photoUrl: 'https://image.tmdb.org/t/p/w185/11.jpg' },
@@ -295,7 +295,7 @@ export const SEED_TITLES: SeedTitleData[] = [
     ],
   },
   {
-    tmdbId: 95557,
+    tmdbId: 95396,
     name: 'Severance',
     type: 'tv',
     genres: ['Drama', 'Mystery', 'Sci-Fi & Fantasy'],
@@ -303,8 +303,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 55,
     releaseYear: 2022,
     voteAverage: 8.4,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/pvi5b.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/gL9k8.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/ixgFmf1X59PUZam2qbAfskx2gQr.jpg',
     moodTags: ['Mind-Bending', 'Dark & Gritty', 'Philosophical', 'Suspenseful'],
     cast: [
       { actorName: 'Adam Scott', characterName: 'Mark Scout', photoUrl: 'https://image.tmdb.org/t/p/w185/14.jpg' },
@@ -381,7 +381,7 @@ export const SEED_TITLES: SeedTitleData[] = [
     releaseYear: 2010,
     voteAverage: 8.4,
     posterUrl: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/s3TBrRGB1jav7Z2ARIEsvxZTk.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg',
     moodTags: ['Mind-Bending', 'Fast-Paced', 'High-Stakes', 'Cinematic Spectacle'],
     cast: [
       { actorName: 'Leonardo DiCaprio', characterName: 'Dom Cobb', photoUrl: 'https://image.tmdb.org/t/p/w185/23.jpg' },
@@ -407,8 +407,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 42,
     releaseYear: 2021,
     voteAverage: 8.7,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/fqldf2t8ztc9aiwn397cv.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/rkB4LyZHo1NHXSTXY7.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/87C0wecB8bHb1PsrKBI4kJiEkgV.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/5cvnxEHT3e39DvT6ARw4GNCFrB0.jpg',
     moodTags: ['Visually Stunning', 'Emotional', 'High-Stakes', 'Dark & Gritty'],
     cast: [
       { actorName: 'Hailee Steinfeld', characterName: 'Vi (voice)', photoUrl: 'https://image.tmdb.org/t/p/w185/27.jpg' },
@@ -432,8 +432,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 55,
     releaseYear: 2023,
     voteAverage: 8.6,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2V7J.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/uDgy6hyPd82kOH2UmU.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/dmo6TYuuJgaYinXBPjrgG9mB5od.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/lY2DhbA7Hy44fAKddr06UrXWWaQ.jpg',
     moodTags: ['Emotional', 'Dark & Gritty', 'High-Stakes', 'Suspenseful'],
     cast: [
       { actorName: 'Pedro Pascal', characterName: 'Joel Miller', photoUrl: 'https://image.tmdb.org/t/p/w185/29.jpg' },
@@ -456,8 +456,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 50,
     releaseYear: 2022,
     voteAverage: 8.1,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/j73ytuzox2.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/j0P82z.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/f1VCQIG2iCyOookdgOzwtUpwWC0.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/pF0qkRsrHkdYadPWY9AMeFZfcwk.jpg',
     moodTags: ['Adrenaline Rush', 'Dark & Gritty', 'Fast-Paced'],
     cast: [
       { actorName: 'Alan Ritchson', characterName: 'Jack Reacher', photoUrl: 'https://image.tmdb.org/t/p/w185/31.jpg' },
@@ -476,8 +476,8 @@ export const SEED_TITLES: SeedTitleData[] = [
     runtimeMinutes: 141,
     releaseYear: 2004,
     voteAverage: 8.0,
-    posterUrl: 'https://image.tmdb.org/t/p/w500/aweqw9p5.jpg',
-    backdropUrl: 'https://image.tmdb.org/t/p/w1280/vbk5C3.jpg',
+    posterUrl: 'https://image.tmdb.org/t/p/w500/aWxwnYoe8p2d2fcxOqtvAtJ72Rw.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/htmYEfH7TQgzsXHCnNXxmoYKQtL.jpg',
     moodTags: ['Nostalgic', 'Spooky', 'Cinematic Spectacle', 'Heartwarming'],
     cast: [
       { actorName: 'Daniel Radcliffe', characterName: 'Harry Potter', photoUrl: 'https://image.tmdb.org/t/p/w185/32.jpg' },
