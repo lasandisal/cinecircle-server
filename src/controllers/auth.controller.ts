@@ -177,7 +177,7 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
  */
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, email, password, otp } = req.body;
+    const { name, email, password, otp, bio } = req.body;
 
     if (!name || !email || !password) {
       return next(new AppError('Name, email, and password are required.', 400));
@@ -232,6 +232,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
         email: cleanEmail,
         passwordHash,
         role: 'user',
+        bio: typeof bio === 'string' ? bio.trim().slice(0, 180) : '',
         subscribedServices: [],
         fatigueCount: 0,
         tasteProfile: {
