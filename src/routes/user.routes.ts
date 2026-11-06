@@ -11,6 +11,8 @@ import {
   getConnections,
   getUserSuggestions,
   getNotifications,
+  requestConnection,
+  respondToConnection,
 } from '../controllers/user.controller';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 
@@ -30,5 +32,7 @@ router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
 router.post('/onboarding', authenticate, completeOnboarding);
 router.post('/follow', authenticate, toggleFollow);
+router.post('/connections/request', authenticate, requestConnection);
+router.post('/connections/respond', authenticate, respondToConnection);
 
 export default router;

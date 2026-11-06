@@ -6,6 +6,7 @@ import { AppError } from '../middleware/error.middleware';
 import { CompatibilityService } from '../services/compatibility.service';
 import { RecommendationService } from '../services/recommendation.service';
 import { FollowService, FollowError } from '../services/follow.service';
+import { ConnectionError, ConnectionService } from '../services/connection.service';
 
 /**
  * Redact a user document for someone who is not the owner.
@@ -66,6 +67,8 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       followCounts,
       circlesCount,
       reviewsCount,
+      connectionsCount,
+      connectionStatus,
     ] = await Promise.all([
       prisma.tasteProfile.findUnique({ where: { userId: targetUserId } }),
       prisma.watchlist.count({ where: { userId: targetUserId, watched: false } }),
@@ -75,6 +78,8 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
         where: { participants: { some: { id: targetUserId } } },
       }),
       prisma.comment.count({ where: { userId: targetUserId } }),
+      ConnectionService.countAccepted(targetUserId),
+      ConnectionService.getStatus(req.user?.id, targetUserId),
     ]);
 
     const [
@@ -154,6 +159,7 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             followingCount: followCounts.followingCount,
             followersCount: followCounts.followersCount,
             mutualConnectionsCount: followCounts.mutualConnectionsCount,
+            connectionsCount,
             circlesCount,
             reviewsCount,
             mutualWatchedCount: mutualWatchedTitles.length,
@@ -161,6 +167,8 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             circleCompatibilityBasis: compatibility.basis,
             circleCompatibilityExplanation: compatibility.explanation,
           },
+          connectionStatus: connectionStatus.status,
+          connectionRequestId: connectionStatus.requestId,
           mutualWatchedTitles: mutualWatchedTitles
             .filter((w) => w.title != null)
             .map((w) => ({ ...w, _id: w.id, title: formatTitleForCard(w.title) })),
@@ -188,6 +196,30 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
     );
   } catch (error) {
     next(error);
+  }
+};
+
+export const requestConnection = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user?.id || !req.body?.targetUserId) {
+      return next(new AppError('targetUserId is required', 400));
+    }
+    await ConnectionService.request(req.user.id, req.body.targetUserId);
+    sendSuccess(res, { status: 'pending_sent' }, 'Connection request sent');
+  } catch (error: any) {
+    next(error instanceof ConnectionError ? new AppError(error.message, error.statusCode) : error);
+  }
+};
+
+export const respondToConnection = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.user?.id || !req.body?.requestId || !['accepted', 'rejected'].includes(req.body.status)) {
+      return next(new AppError('requestId and a valid status are required', 400));
+    }
+    await ConnectionService.respond(req.user.id, req.body.requestId, req.body.status);
+    sendSuccess(res, { status: req.body.status }, `Connection request ${req.body.status}`);
+  } catch (error: any) {
+    next(error instanceof ConnectionError ? new AppError(error.message, error.statusCode) : error);
   }
 };
 

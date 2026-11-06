@@ -32,6 +32,8 @@ model User {
   joinedSessions   Session[]      @relation("SessionParticipants")
   following        Follow[]       @relation("UserFollowing")
   followers        Follow[]       @relation("UserFollowers")
+  sentConnectionRequests     ConnectionRequest[] @relation("ConnectionRequestSender")
+  receivedConnectionRequests ConnectionRequest[] @relation("ConnectionRequestRecipient")
   soundtracksAdded Soundtrack[]
 }
 
@@ -230,6 +232,22 @@ model Follow {
   followedTitle Title? @relation(fields: [followedTitleId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followedType, followedUserId, followedTitleId])
+}
+
+model ConnectionRequest {
+  id          String   @id @default(uuid())
+  senderId    String
+  recipientId String
+  status      String   @default("pending") // "pending" | "accepted" | "rejected"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sender    User @relation("ConnectionRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient User @relation("ConnectionRequestRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, recipientId])
+  @@index([recipientId, status])
+  @@index([senderId, status])
 }
 
 model Otp {
