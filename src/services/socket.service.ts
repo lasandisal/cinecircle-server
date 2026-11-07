@@ -12,6 +12,7 @@ import { SessionService, SessionServiceError } from './session.service';
 export class SocketService {
   // Holds the active Socket.IO server instance globally within this class
   private static io: SocketIOServer | null = null;
+  private static onlineUsers = new Map<string, Set<string>>();
 
   /**
    * INITIALIZATION METHOD
@@ -27,6 +28,14 @@ export class SocketService {
     io.on('connection', (socket: Socket) => {
       // Extract user info safely attached during the auth middleware step
       const user = socket.data.user;
+      const userSockets = this.onlineUsers.get(user.id) ?? new Set<string>();
+      const wasOnline = userSockets.size > 0;
+      userSockets.add(socket.id);
+      this.onlineUsers.set(user.id, userSockets);
+
+      if (!wasOnline) {
+        io.emit('presence:online', { userId: user.id });
+      }
 
       /**
        * EVENT: Join a group session room using a 6-character join code
@@ -137,6 +146,12 @@ export class SocketService {
        * EVENT: Client disconnects from the socket server
        */
       socket.on('disconnect', (reason: string) => {
+        const activeSockets = this.onlineUsers.get(user.id);
+        activeSockets?.delete(socket.id);
+        if (activeSockets && activeSockets.size === 0) {
+          this.onlineUsers.delete(user.id);
+          io.emit('presence:offline', { userId: user.id });
+        }
         console.log(`[Socket] user ${user?.id} disconnected (${reason})`);
       });
     });
