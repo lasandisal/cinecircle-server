@@ -167,7 +167,7 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
       },
       'Titles retrieved successfully'
     );
-  } catch (error) {
+  } catch (error: any) {
     next(error);
   }
 };
@@ -260,7 +260,8 @@ export const getTrendingTitles = async (req: Request, res: Response, next: NextF
 
     trendingCache.set(cacheKey, { at: Date.now(), titles, source });
     sendSuccess(res, { titles, source }, 'Trending titles retrieved');
-  } catch (error) {
+  } catch (error: any) {
+    console.error('[Titles][trending] Failed to load trending titles:', error?.message || error);
     next(error);
   }
 };

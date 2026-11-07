@@ -196,7 +196,10 @@ export class SeedService {
   }
 
   /**
-   * Automatically runs on server startup if the Title collection is empty.
+   * Automatically runs on server startup.
+   * Seeds all titles if the DB is empty, and upserts any seed titles that are
+   * missing from an existing DB (e.g. newly added titles such as Gossip Girl).
+   * Uses upsert so existing titles are never duplicated.
    */
   public static async autoSeedIfEmpty(): Promise<void> {
     try {
@@ -204,6 +207,19 @@ export class SeedService {
       if (count === 0) {
         console.log('[SeedService] Database is empty. Initiating automatic catalog seeding...');
         await SeedService.seedAll();
+        return;
+      }
+
+      // Ensure any seed titles that are missing from an existing DB get added.
+      // This is idempotent: seedAll() uses upsert keyed by tmdbId.
+      const existing = await prisma.title.findMany({ select: { tmdbId: true } });
+      const existingIds = new Set(existing.map((t) => t.tmdbId));
+      const missing = SEED_TITLES.filter((t) => !existingIds.has(t.tmdbId));
+      if (missing.length > 0) {
+        console.log(
+          `[SeedService] Found ${missing.length} missing seed title(s), adding: ${missing.map((t) => t.name).join(', ')}`
+        );
+        await SeedService.seedAll(true);
       }
     } catch (err: any) {
       console.error('[SeedService] Auto-seed failed:', err.message);

@@ -13,6 +13,8 @@ export interface FormattedTmdbTitle {
   runtimeMinutes: number;
   releaseYear: number;
   voteAverage: number;
+  /** NEW: needed for Bayesian-style rating in the controller. */
+  voteCount?: number;
   posterUrl: string;
   backdropUrl: string;
   moodTags: string[];
@@ -38,7 +40,7 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
 
-// Canonical TMDB Genre ID to Name Mapping
+// Canonical TMDB Genre ID to Name Mapping (used to turn genre_ids into names)
 const GENRE_MAP: Record<number, string> = {
   28: 'Action',
   12: 'Adventure',
@@ -67,6 +69,31 @@ const GENRE_MAP: Record<number, string> = {
   10766: 'Soap',
   10767: 'Talk',
   10768: 'War & Politics',
+};
+
+/**
+ * NEW: genre NAME -> TMDB genre id, PER media type.
+ *
+ * The old code looked names up in the single GENRE_MAP above, so for TV:
+ *  - "Action", "Adventure" resolved to the MOVIE ids (28/12) which TV doesn't use
+ *    (TV uses 10759), and
+ *  - "Science Fiction"/"Fantasy" resolved to 878/14 (movie ids; TV uses 10765).
+ * That silently returned wrong or empty TV discovery results.
+ * TV has no Romance / Thriller / Horror genre ids at all, so those are skipped
+ * for TV (the semantic validator handles them instead).
+ */
+const MOVIE_GENRE_IDS: Record<string, number> = {
+  action: 28, adventure: 12, animation: 16, comedy: 35, crime: 80, documentary: 99,
+  drama: 18, family: 10751, fantasy: 14, history: 36, horror: 27, music: 10402,
+  mystery: 9648, romance: 10749, 'science fiction': 878, 'sci-fi': 878, thriller: 53,
+  war: 10752, western: 37,
+};
+const TV_GENRE_IDS: Record<string, number> = {
+  action: 10759, adventure: 10759, 'action & adventure': 10759, animation: 16, comedy: 35,
+  crime: 80, documentary: 99, drama: 18, family: 10751, kids: 10762, mystery: 9648,
+  news: 10763, reality: 10764, fantasy: 10765, 'science fiction': 10765, 'sci-fi': 10765,
+  'sci-fi & fantasy': 10765, soap: 10766, talk: 10767, war: 10768, 'war & politics': 10768,
+  western: 37,
 };
 
 class TmdbService {
@@ -191,6 +218,223 @@ class TmdbService {
       const q = query.toLowerCase().trim();
       return SEED_TITLES.filter((t) => t.name.toLowerCase().includes(q)) as FormattedTmdbTitle[];
     }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /*  STEP 3: broad CANDIDATE RETRIEVAL (not a relevance decision)            */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * Retrieve a broad pool of possible matches. TMDB does NOT decide what is
+   * relevant - the controller + Gemini do that afterwards.
+   *
+   * What was wrong before:
+   *  1. `with_genres` used a comma = AND. "Drama,Romance" only returned titles
+   *     having BOTH. Now pipe = OR (broader).
+   *  2. `with_keywords` used a comma = AND of the FIRST search hit per phrase,
+   *     with no sanity check. "elite Manhattan society" -> random keyword id ->
+   *     (almost) zero results, or a wrong-topic keyword -> unrelated titles.
+   *     Now OR, and a resolved keyword must actually resemble the phrase.
+   *  3. Runtime param was `with_runtime_lte`. TMDB's param is `with_runtime.lte`
+   *     (dot), so the filter was silently ignored.
+   *  4. If no type was given it ALWAYS searched movies. Now it searches both.
+   *  5. Only one page / ~20 results, with search hits overriding discover hits.
+   *     Now several complementary calls are merged and de-duplicated.
+   *  6. TV genre ids were wrong (see TV_GENRE_IDS).
+   */
+  public async discoverTitles(options: {
+    type?: 'film' | 'tv';
+    genres?: string[];
+    keywords?: string[];
+    query?: string;
+    queries?: string[];
+    maxRuntime?: number;
+    page?: number;
+    /**
+     * One group of search terms PER REQUIRED CONCEPT, e.g.
+     * [['upper east side','manhattan'], ['teen','high school']].
+     * Each group is retrieved separately, so a rare concept (the setting) is not
+     * drowned out by a broad one (teenagers).
+     */
+    keywordGroups?: string[][];
+    /** Max candidates returned in total (default 30). */
+    limit?: number;
+  }): Promise<FormattedTmdbTitle[]> {
+    if (!this.hasApiKey()) return [];
+
+    const limit = options.limit ?? 30;
+    const types: ('film' | 'tv')[] = options.type ? [options.type] : ['film', 'tv'];
+    const perType = Math.ceil(limit / types.length);
+
+    const perTypeResults = await Promise.all(types.map((t) => this.discoverForType(t, options, perType)));
+
+    // Interleave so one media type cannot crowd out the other.
+    const merged: FormattedTmdbTitle[] = [];
+    const seen = new Set<string>();
+    const longest = Math.max(...perTypeResults.map((r) => r.length), 0);
+    for (let i = 0; i < longest; i++) {
+      for (const list of perTypeResults) {
+        const item = list[i];
+        if (!item) continue;
+        // movie and TV ids can collide, so the key includes the type.
+        const key = `${item.type}:${item.tmdbId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
+      }
+    }
+    return merged.slice(0, limit);
+  }
+
+  private async discoverForType(
+    mediaType: 'film' | 'tv',
+    options: {
+      genres?: string[];
+      keywords?: string[];
+      query?: string;
+      queries?: string[];
+      maxRuntime?: number;
+      page?: number;
+      keywordGroups?: string[][];
+    },
+    cap: number
+  ): Promise<FormattedTmdbTitle[]> {
+    const tmdbType = mediaType === 'tv' ? 'tv' : 'movie';
+    const page = options.page || 1;
+
+    const genreIds = this.resolveGenreIds(options.genres || [], mediaType);
+    const keywordIds = await this.resolveKeywordIds(options.keywords || []);
+    const groupIds = await Promise.all(
+      (options.keywordGroups || []).map((group) => this.resolveKeywordIds(group, 2))
+    );
+    console.info(
+      `[TmdbService] ${tmdbType} keyword ids -> general: [${keywordIds.join(',')}] groups: ${JSON.stringify(groupIds)}`
+    );
+
+    const base: Record<string, any> = {
+      page,
+      sort_by: 'popularity.desc',
+      include_adult: false,
+      include_video: false,
+      'vote_count.gte': 20,
+    };
+    // FIX: the parameter name contains a dot (was `with_runtime_lte`, which TMDB ignores).
+    if (options.maxRuntime && options.maxRuntime > 0) base['with_runtime.lte'] = options.maxRuntime;
+
+    const discover = async (extra: Record<string, any>): Promise<any[]> => {
+      try {
+        const res = await axios.get(`${TMDB_BASE_URL}/discover/${tmdbType}`, this.getRequestConfig({ ...base, ...extra }));
+        return res.data?.results || [];
+      } catch (error: any) {
+        console.warn(`[TmdbService] discover/${tmdbType} failed:`, error?.message || error);
+        return [];
+      }
+    };
+
+    const calls: Promise<any[]>[] = [];
+    // PER-CONCEPT retrieval: one discover (3 pages) per required concept.
+    for (const ids of groupIds) {
+      if (ids.length === 0) continue;
+      for (const pageNo of [1, 2, 3]) {
+        calls.push(discover({ with_keywords: ids.join('|'), page: pageNo }));
+      }
+    }
+    // Pipe = OR in TMDB. Genres/keywords widen the pool; they don't narrow it.
+    if (keywordIds.length > 0 && genreIds.length > 0) {
+      calls.push(discover({ with_keywords: keywordIds.join('|'), with_genres: genreIds.join('|') }));
+    }
+    if (keywordIds.length > 0) calls.push(discover({ with_keywords: keywordIds.join('|') }));
+    if (genreIds.length > 0) calls.push(discover({ with_genres: genreIds.join('|') }));
+    if (keywordIds.length === 0 && genreIds.length === 0) calls.push(discover({}));
+
+    // Text search (original prompt + concept phrases) is an extra retrieval signal.
+    const queries = Array.from(
+      new Set(
+        [...(options.queries || []), ...(options.query ? [options.query] : [])]
+          .map((q) => q.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 4);
+    for (const q of queries) {
+      calls.push(
+        axios
+          .get(`${TMDB_BASE_URL}/search/${tmdbType}`, this.getRequestConfig({ query: q, page, include_adult: false }))
+          .then((r) => r.data?.results || [])
+          .catch((error: any) => {
+            console.warn(`[TmdbService] search/${tmdbType} "${q}" failed:`, error?.message || error);
+            return [];
+          })
+      );
+    }
+
+    const batches = await Promise.all(calls);
+    // A title found by SEVERAL concept searches (e.g. both "Manhattan" and "teen")
+    // is far more likely to match everything the user asked for, so it ranks first.
+    const unique = new Map<number, { title: FormattedTmdbTitle; hits: number }>();
+    for (const batch of batches) {
+      const seenInBatch = new Set<number>();
+      for (const raw of batch) {
+        const mapped = this.mapRawToFormatted({ ...raw, media_type: tmdbType });
+        if (!mapped.name || seenInBatch.has(mapped.tmdbId)) continue;
+        seenInBatch.add(mapped.tmdbId);
+        const existing = unique.get(mapped.tmdbId);
+        if (existing) existing.hits += 1;
+        else unique.set(mapped.tmdbId, { title: mapped, hits: 1 });
+      }
+    }
+    const result = Array.from(unique.values())
+      .sort((a, b) => b.hits - a.hits) // stable: ties keep TMDB popularity order
+      .slice(0, cap)
+      .map((entry) => entry.title);
+    console.info(`[TmdbService] ${tmdbType}: ${unique.size} unique candidates, returning ${result.length}`);
+    return result;
+  }
+
+  /** Genre names -> ids valid for THAT media type. Unknown names are skipped. */
+  private resolveGenreIds(names: string[], mediaType: 'film' | 'tv'): number[] {
+    const table = mediaType === 'tv' ? TV_GENRE_IDS : MOVIE_GENRE_IDS;
+    const ids = names
+      .map((n) => table[n.toLowerCase().trim()])
+      .filter((id): id is number => typeof id === 'number');
+    return Array.from(new Set(ids));
+  }
+
+  private keywordCache = new Map<string, number[]>();
+
+  /**
+   * Resolve search terms to TMDB keyword ids. A hit is only accepted when its
+   * name really resembles the term (old code blindly trusted result[0]).
+   * Up to `perTerm` matching ids are kept per term, and lookups are cached.
+   */
+  private async resolveKeywordIds(keywords: string[], perTerm = 1): Promise<number[]> {
+    const unique = Array.from(new Set(keywords.map((k) => k.toLowerCase().trim()).filter((k) => k.length >= 3))).slice(0, 8);
+    const lists = await Promise.all(
+      unique.map(async (keyword) => {
+        const cacheKey = `${keyword}|${perTerm}`;
+        const cached = this.keywordCache.get(cacheKey);
+        if (cached) return cached;
+        try {
+          const response = await axios.get(
+            `${TMDB_BASE_URL}/search/keyword`,
+            this.getRequestConfig({ query: keyword })
+          );
+          const words = keyword.split(/\s+/).filter((w) => w.length > 3);
+          const ids = (response.data?.results || [])
+            .filter((r: any) => {
+              const name = String(r.name || '').toLowerCase();
+              return name === keyword || keyword.includes(name) || words.some((w) => name.includes(w));
+            })
+            .slice(0, perTerm)
+            .map((r: any) => r.id as number);
+          this.keywordCache.set(cacheKey, ids);
+          return ids;
+        } catch (error: any) {
+          console.warn(`[TmdbService][keyword-resolution] Failed for "${keyword}":`, error?.message || error);
+          return [] as number[];
+        }
+      })
+    );
+    return Array.from(new Set(lists.flat()));
   }
 
   /**
@@ -367,6 +611,7 @@ class TmdbService {
             ? parseInt((data.release_date || '2024').substring(0, 4), 10)
             : parseInt((data.first_air_date || '2024').substring(0, 4), 10),
           voteAverage: Math.round((data.vote_average || 7.5) * 10) / 10,
+          voteCount: data.vote_count,
           posterUrl: data.poster_path ? `${TMDB_IMAGE_BASE}${data.poster_path}` : '',
           backdropUrl: data.backdrop_path ? `${TMDB_BACKDROP_BASE}${data.backdrop_path}` : '',
           moodTags: fallbackMatch ? fallbackMatch.moodTags : this.generateMoodTags(genres),
@@ -453,14 +698,19 @@ class TmdbService {
     return {
       tmdbId: item.id,
       name: isMovie ? item.title : item.name,
+      // NEW: the controller/validator reads originalName; it was never populated here.
+      originalName: isMovie ? item.original_title : item.original_name,
       type: isMovie ? 'film' : 'tv',
-      genres: genreNames.length > 0 ? genreNames : ['Drama'],
+      // CHANGED: was `['Drama']` when TMDB sent no genres. That invented a genre
+      // and made unrelated titles look like Drama matches. Unknown = empty.
+      genres: genreNames,
       synopsis: item.overview || '',
       // Trending/search payloads do not include runtime. 0 means "unknown"
       // so the UI can omit it instead of displaying a fabricated value.
       runtimeMinutes: 0,
       releaseYear,
       voteAverage: Math.round((item.vote_average || 0) * 10) / 10,
+      voteCount: item.vote_count,
       posterUrl: item.poster_path ? `${TMDB_IMAGE_BASE}${item.poster_path}` : '',
       backdropUrl: item.backdrop_path ? `${TMDB_BACKDROP_BASE}${item.backdrop_path}` : '',
       moodTags: this.generateMoodTags(genreNames),

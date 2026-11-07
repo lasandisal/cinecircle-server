@@ -1,25 +1,11 @@
-import axios from 'axios';
-import { ENV } from '../config/env';
+import { tmdbService } from './TmdbService';
 
 /**
- * Service skeleton for TMDB API interactions
- * (Catalogue search, details, credits/cast, watch-provider data)
+ * Backwards-compatible alias.
+ *
+ * The full TMDB implementation lives in TmdbService.ts (capital T). This file
+ * re-exports it so any existing imports of './tmdb.service' keep working without
+ * accidentally using the old empty stub (search() returned [], getDetails()
+ * returned null, and discoverTitles() did not exist).
  */
-export class TmdbService {
-  private static baseURL = 'https://api.themoviedb.org/3';
-
-  static async search(query: string, type: 'movie' | 'tv' = 'movie') {
-    // Skeleton placeholder for TMDB API search
-    return [];
-  }
-
-  static async getDetails(tmdbId: number, type: 'movie' | 'tv' = 'movie') {
-    // Skeleton placeholder for TMDB details
-    return null;
-  }
-
-  static async getWatchProviders(tmdbId: number, type: 'movie' | 'tv' = 'movie') {
-    // Skeleton placeholder for JustWatch-backed TMDB watch providers
-    return [];
-  }
-}
+export { tmdbService };

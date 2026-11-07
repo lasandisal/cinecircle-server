@@ -515,4 +515,30 @@ export const SEED_TITLES: SeedTitleData[] = [
       { songName: 'The Batman Theme', artist: 'Michael Giacchino', popularityRank: 2 },
     ],
   },
+  {
+    tmdbId: 1395,
+    name: 'Gossip Girl',
+    type: 'tv',
+    genres: ['Drama', 'Romance'],
+    synopsis: 'Privileged teenagers on New Yorks Upper East Side navigate scandals, secrets, and social rivalries while an anonymous blogger exposes their every move.',
+    runtimeMinutes: 42,
+    releaseYear: 2007,
+    voteAverage: 7.4,
+    posterUrl: 'https://image.tmdb.org/t/p/w500/7Bq9fBk6S8c0zJL1WzJZ9z8qQqS.jpg',
+    backdropUrl: 'https://image.tmdb.org/t/p/w1280/7Bq9fBk6S8c0zJL1WzJZ9z8qQqS.jpg',
+    moodTags: ['Dark & Gritty', 'Suspenseful', 'Intense', 'Atmospheric'],
+    cast: [
+      { actorName: 'Blake Lively', characterName: 'Serena van der Woodsen', photoUrl: 'https://image.tmdb.org/t/p/w185/1.jpg' },
+      { actorName: 'Leighton Meester', characterName: 'Blair Waldorf', photoUrl: 'https://image.tmdb.org/t/p/w185/2.jpg' },
+      { actorName: 'Penn Badgley', characterName: 'Dan Humphrey', photoUrl: 'https://image.tmdb.org/t/p/w185/3.jpg' },
+    ],
+    watchProviders: [
+      { service: 'Max', region: 'US', type: 'subscription' },
+      { service: 'Netflix', region: 'US', type: 'subscription' },
+    ],
+    soundtracks: [
+      { songName: 'Young Folks', artist: 'Peter Bjorn and John', popularityRank: 1 },
+      { songName: 'Bittersweet Symphony', artist: 'The Verve', popularityRank: 2 },
+    ],
+  },
 ];
