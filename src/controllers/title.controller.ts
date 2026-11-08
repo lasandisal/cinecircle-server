@@ -576,7 +576,7 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
               popularityRank: dt.popularityRank,
               previewUrl: dt.previewUrl,
               albumArtUrl: dt.albumArtUrl,
-              spotifyUrl: dt.spotifyUrl,
+              spotifyUrl: dt.appleMusicUrl,
               source: 'auto',
               sourceUpdatedAt: now,
             }));
@@ -666,7 +666,7 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
                       sceneRef: matched.episodeRef,
                       previewUrl: matched.previewUrl,
                       albumArtUrl: matched.albumArtUrl,
-                      spotifyUrl: matched.spotifyUrl,
+                      spotifyUrl: matched.appleMusicUrl,
                     }
                   : ep.featuredSong,
               };
@@ -841,7 +841,7 @@ export const getSeasonEpisodes = async (
                   sceneRef: matched.episodeRef,
                   previewUrl: matched.previewUrl,
                   albumArtUrl: matched.albumArtUrl,
-                  spotifyUrl: matched.spotifyUrl,
+                  spotifyUrl: matched.appleMusicUrl,
                 }
               : ep.featuredSong,
           };
@@ -1143,7 +1143,7 @@ export const searchMusic = async (req: Request, res: Response, next: NextFunctio
 export const addTitleSoundtrack = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
-    const { songName, artist, episodeRef, previewUrl, albumArtUrl, spotifyUrl } = req.body;
+    const { songName, artist, episodeRef, previewUrl, albumArtUrl, appleMusicUrl, spotifyUrl } = req.body;
 
     if (!songName || !artist) {
       res.status(400).json({ success: false, error: 'Song name and artist are required' });
@@ -1167,7 +1167,7 @@ export const addTitleSoundtrack = async (req: Request, res: Response, next: Next
 
     let finalPreview = previewUrl;
     let finalArt = albumArtUrl;
-    let finalLink = spotifyUrl;
+    let finalLink = spotifyUrl || appleMusicUrl;
 
     if (!finalPreview || !finalArt) {
       const enriched = await SoundtrackService.enrichTrackWithAudio(songName, artist);

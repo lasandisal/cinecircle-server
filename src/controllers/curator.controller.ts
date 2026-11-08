@@ -112,7 +112,7 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
           popularityRank: item.popularityRank || i + 1,
           previewUrl: audio.previewUrl || item.previewUrl,
           albumArtUrl: audio.albumArtUrl || item.albumArtUrl,
-          spotifyUrl: audio.appleMusicUrl || item.spotifyUrl,
+          spotifyUrl: audio.appleMusicUrl || item.appleMusicUrl,
         },
       });
 
@@ -142,7 +142,7 @@ export const addCuratedSoundtrack = async (req: IAuthRequest, res: Response, nex
                 sceneRef: matched.episodeRef,
                 previewUrl: matched.previewUrl,
                 albumArtUrl: matched.albumArtUrl,
-                spotifyUrl: matched.spotifyUrl,
+                spotifyUrl: matched.appleMusicUrl,
               };
               seasonUpdated = true;
             }

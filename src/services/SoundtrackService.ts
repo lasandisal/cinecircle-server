@@ -7,7 +7,7 @@ export interface SoundtrackTrack {
   popularityRank: number;
   previewUrl?: string;
   albumArtUrl?: string;
-  spotifyUrl?: string;
+  appleMusicUrl?: string;
 }
 
 const ICONIC_SOUNDTRACKS: Record<string, { songName: string; artist: string; episodeRef: string; popularityRank: number }[]> = {
@@ -380,7 +380,7 @@ export class SoundtrackService {
       popularityRank: idx + 1,
       previewUrl: item.previewUrl || undefined,
       albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
-      spotifyUrl: item.trackViewUrl || undefined,
+      appleMusicUrl: item.trackViewUrl || undefined,
     }));
 
     this.searchCache.set(cacheKey, { at: Date.now(), tracks });
@@ -593,7 +593,7 @@ export class SoundtrackService {
               popularityRank: allTracks.length + 1,
               previewUrl: item.previewUrl || undefined,
               albumArtUrl: item.artworkUrl100 || matchedAlbum.artworkUrl100 || undefined,
-              spotifyUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
+              appleMusicUrl: item.trackViewUrl || matchedAlbum.collectionViewUrl || undefined,
             });
           }
         }
@@ -663,7 +663,7 @@ export class SoundtrackService {
                 popularityRank: idx + 1,
                 previewUrl: audio.previewUrl,
                 albumArtUrl: audio.albumArtUrl,
-                spotifyUrl: audio.appleMusicUrl,
+                appleMusicUrl: audio.appleMusicUrl,
               };
             })
           );
@@ -741,7 +741,7 @@ export class SoundtrackService {
               popularityRank: s.popularityRank,
               previewUrl: audioData.previewUrl,
               albumArtUrl: audioData.albumArtUrl,
-              spotifyUrl: audioData.appleMusicUrl,
+              appleMusicUrl: audioData.appleMusicUrl,
             };
           })
         );
@@ -829,7 +829,7 @@ export class SoundtrackService {
             popularityRank: dynamicTracks.length + 1,
             previewUrl: item.previewUrl || undefined,
             albumArtUrl: item.artworkUrl100 || item.artworkUrl60 || undefined,
-            spotifyUrl: item.trackViewUrl || undefined,
+            appleMusicUrl: item.trackViewUrl || undefined,
           });
 
           if (dynamicTracks.length >= 12) break;
@@ -855,7 +855,7 @@ export class SoundtrackService {
         popularityRank: 1,
         previewUrl: genericAudio.previewUrl,
         albumArtUrl: genericAudio.albumArtUrl,
-        spotifyUrl: genericAudio.appleMusicUrl,
+        appleMusicUrl: genericAudio.appleMusicUrl,
       },
     ];
   }
@@ -929,4 +929,3 @@ export class SoundtrackService {
     return pool[(episodeNumber - 1) % pool.length];
   }
 }
-
