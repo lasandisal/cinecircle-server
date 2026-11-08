@@ -678,7 +678,39 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
       });
     }
 
-    // 2. Real Followers who followed this user
+    // 2. Pending connection requests addressed to this user
+    const pendingRequests = await prisma.connectionRequest.findMany({
+      where: {
+        recipientId: userId,
+        status: 'pending',
+      },
+      include: {
+        sender: { select: { id: true, name: true, avatar: true, handle: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+    });
+
+    for (const request of pendingRequests) {
+      const senderName = request.sender.name || 'Community Member';
+      notifications.push({
+        id: `connection-request-${request.id}`,
+        type: 'follow',
+        actorName: senderName,
+        actorAvatar:
+          request.sender.avatar ||
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(senderName)}&background=6366f1&color=fff`,
+        title: 'sent you a connection request.',
+        detail: request.sender.handle || 'Review their profile to respond',
+        timestamp: request.createdAt ? new Date(request.createdAt).toLocaleDateString() : 'Recent',
+        read: false,
+        actionUrl: `/profile/${request.sender.id}`,
+        actionText: 'Review Request',
+        createdAt: request.createdAt,
+      });
+    }
+
+    // 3. Real Followers who followed this user
     const recentFollowers = await prisma.follow.findMany({
       where: {
         followedType: 'user',
