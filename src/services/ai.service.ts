@@ -674,8 +674,8 @@ Return ONLY valid JSON matching this schema:
 `;
 
       const result = await this.withTimeout(
-        this.withRetry(() => model.generateContent([systemInstruction, `User prompt: "${cleanPrompt}"`]), 2),
-        6000 // 2500ms was too tight for a structured answer and caused needless fallbacks
+        this.withRetry(() => model.generateContent([systemInstruction, `User prompt: "${cleanPrompt}"`]), 3),
+        Number(process.env.GEMINI_REQUEST_TIMEOUT_MS || 15000) // Increased: Gemini can be slow; local fallback still covers timeouts
       );
 
       const jsonMatch = result.response.text().match(/\{[\s\S]*\}/);
@@ -887,8 +887,8 @@ Return ONLY a JSON array, one item per candidate, echoing "id" exactly:
         };
 
         const result = await this.withTimeout(
-          this.withRetry(() => model.generateContent([instruction, JSON.stringify(payload)]), 2),
-          10000
+          this.withRetry(() => model.generateContent([instruction, JSON.stringify(payload)]), 3),
+          Number(process.env.GEMINI_EVAL_TIMEOUT_MS || 20000)
         );
 
         const arrMatch = result.response.text().match(/\[[\s\S]*\]/);

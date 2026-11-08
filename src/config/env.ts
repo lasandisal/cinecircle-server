@@ -48,6 +48,8 @@ export const ENV = {
   TMDB_API_KEY: process.env.TMDB_API_KEY || '',
   TMDB_ACCESS_TOKEN: process.env.TMDB_ACCESS_TOKEN || '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+  GEMINI_REQUEST_TIMEOUT_MS: process.env.GEMINI_REQUEST_TIMEOUT_MS || '15000',
+  GEMINI_EVAL_TIMEOUT_MS: process.env.GEMINI_EVAL_TIMEOUT_MS || '20000',
   BREVO_SMTP_HOST: process.env.BREVO_SMTP_HOST || 'smtp-relay.brevo.com',
   BREVO_SMTP_PORT: parseInt(process.env.BREVO_SMTP_PORT || '587', 10),
   BREVO_SMTP_LOGIN: process.env.BREVO_SMTP_LOGIN || 'hello.cinecircle@gmail.com',
