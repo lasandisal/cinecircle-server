@@ -13,6 +13,7 @@ import {
   reactToComment,
   reportComment,
   voteCommentPoll,
+  deleteComment,
   searchMusic,
   addTitleSoundtrack,
   getFeedActivity,
@@ -48,5 +49,6 @@ router.post('/comments/:commentId/like', likeComment);
 router.post('/comments/:commentId/react', authenticate, reactToComment);
 router.post('/comments/:commentId/report', authenticate, reportComment);
 router.post('/comments/:commentId/poll/vote', authenticate, voteCommentPoll);
+router.delete('/comments/:commentId', authenticate, deleteComment);
 
 export default router;

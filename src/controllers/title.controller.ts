@@ -1114,6 +1114,42 @@ export const voteCommentPoll = async (req: IAuthRequest, res: Response, next: Ne
 };
 
 /**
+ * Soft delete a comment (comment author only, or admin).
+ * Sets hidden=true instead of hard-deleting so moderation history is preserved.
+ */
+export const deleteComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+    if (!comment) {
+      res.status(404).json({ success: false, error: 'Comment not found' });
+      return;
+    }
+
+    if (comment.userId !== userId && userRole !== 'admin') {
+      res.status(403).json({ success: false, error: 'You can only delete your own comments' });
+      return;
+    }
+
+    await prisma.comment.update({
+      where: { id: commentId },
+      data: {
+        hidden: true,
+        hiddenBy: userId,
+        hiddenAt: new Date(),
+      },
+    });
+
+    sendSuccess(res, { commentId }, 'Comment deleted');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Search iTunes Apple Music tracks for soundtrack contributor modal
  */
 export const searchMusic = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
