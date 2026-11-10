@@ -30,8 +30,6 @@ model User {
   comments         Comment[]
   createdSessions  Session[]      @relation("CreatedSessions")
   joinedSessions   Session[]      @relation("SessionParticipants")
-  following        Follow[]       @relation("UserFollowing")
-  followers        Follow[]       @relation("UserFollowers")
   sentConnectionRequests     ConnectionRequest[] @relation("ConnectionRequestSender")
   receivedConnectionRequests ConnectionRequest[] @relation("ConnectionRequestRecipient")
   soundtracksAdded Soundtrack[]
@@ -60,7 +58,6 @@ model Title {
   watchlistItems Watchlist[]
   watchHistories WatchHistory[]
   votes          Vote[]
-  follows        Follow[]
 }
 
 model Session {
@@ -217,21 +214,6 @@ model Comment {
   @@index([titleId])
   @@index([reported])
   @@index([hidden])
-}
-
-model Follow {
-  id              String   @id @default(uuid())
-  followerId      String
-  followedType    String // "user" | "title"
-  followedUserId  String?
-  followedTitleId String?
-  createdAt       DateTime @default(now())
-
-  follower      User   @relation("UserFollowing", fields: [followerId], references: [id], onDelete: Cascade)
-  followedUser  User?  @relation("UserFollowers", fields: [followedUserId], references: [id], onDelete: Cascade)
-  followedTitle Title? @relation(fields: [followedTitleId], references: [id], onDelete: Cascade)
-
-  @@unique([followerId, followedType, followedUserId, followedTitleId])
 }
 
 model ConnectionRequest {

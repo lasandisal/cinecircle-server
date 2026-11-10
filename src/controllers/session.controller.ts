@@ -81,7 +81,16 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { name, maxRuntime, moodFilter, shortlistTitleIds } = req.body;
+    const { name, maxRuntime, moodFilter, shortlistTitleIds, selectedParticipantIds } = req.body;
+    const requestedParticipantIds = Array.isArray(selectedParticipantIds)
+      ? selectedParticipantIds.filter((id: unknown): id is string => typeof id === 'string' && id !== userId)
+      : [];
+    const selectedParticipants = requestedParticipantIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: requestedParticipantIds } },
+          select: { id: true },
+        })
+      : [];
 
     let candidateIds: string[] = Array.isArray(shortlistTitleIds) && shortlistTitleIds.length > 0 ? shortlistTitleIds : [];
 
@@ -115,7 +124,10 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
           moodFilter: moodFilter?.trim() || undefined,
         },
         participants: {
-          connect: { id: userId },
+          connect: [
+            { id: userId },
+            ...selectedParticipants.map((participant) => ({ id: participant.id })),
+          ],
         },
       },
     });

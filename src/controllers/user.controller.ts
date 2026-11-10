@@ -5,7 +5,7 @@ import { sendSuccess } from '../utils/response';
 import { AppError } from '../middleware/error.middleware';
 import { CompatibilityService } from '../services/compatibility.service';
 import { RecommendationService } from '../services/recommendation.service';
-import { FollowService, FollowError } from '../services/follow.service';
+import { ConnectionGraphService } from '../services/connection-graph.service';
 import { ConnectionError, ConnectionService } from '../services/connection.service';
 
 /**
@@ -64,7 +64,6 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       tasteProfile,
       watchlistCount,
       watchedCount,
-      followCounts,
       circlesCount,
       reviewsCount,
       connectionsCount,
@@ -73,7 +72,6 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       prisma.tasteProfile.findUnique({ where: { userId: targetUserId } }),
       prisma.watchlist.count({ where: { userId: targetUserId, watched: false } }),
       prisma.watchlist.count({ where: { userId: targetUserId, watched: true } }),
-      FollowService.getCounts(targetUserId),
       prisma.session.count({
         where: { participants: { some: { id: targetUserId } } },
       }),
@@ -114,9 +112,6 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
       }),
     ]);
 
-    const relationship = await FollowService.getRelationship(req.user?.id, targetUserId);
-    const isFollowing = relationship.isFollowing;
-
     const compatibility = await CompatibilityService.compute(
       targetUserId,
       req.user?.id
@@ -156,9 +151,6 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
           stats: {
             watchlistCount,
             watchedCount,
-            followingCount: followCounts.followingCount,
-            followersCount: followCounts.followersCount,
-            mutualConnectionsCount: followCounts.mutualConnectionsCount,
             connectionsCount,
             circlesCount,
             reviewsCount,
@@ -186,9 +178,7 @@ export const getProfile = async (req: IAuthRequest, res: Response, next: NextFun
             _id: s.id,
             host: s.creator ? { ...s.creator, _id: s.creator.id } : null,
           })),
-          isFollowing,
-          isFollowedBy: relationship.isFollowedBy,
-          isMutualConnection: relationship.isMutual,
+          isMutualConnection: connectionStatus.status === 'accepted',
           isSelf: req.user ? req.user.id === targetUserId : false,
         },
       },
@@ -300,34 +290,17 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
       take: 20,
     });
 
-    let followingIds = new Set<string>();
-    if (currentUserId) {
-      const follows = await prisma.follow.findMany({
-        where: { followerId: currentUserId, followedType: 'user' },
-        select: { followedUserId: true },
-      });
-      followingIds = new Set(follows.map((f) => f.followedUserId).filter((id): id is string => Boolean(id)));
-    }
-
     const userIds = users.map((u) => u.id);
-    const [watchedRows, followerRows, compatByUser] = await Promise.all([
+    const [watchedRows, compatByUser] = await Promise.all([
       prisma.watchlist.groupBy({
         by: ['userId'],
         where: { userId: { in: userIds }, watched: true },
         _count: { titleId: true },
       }),
-      prisma.follow.groupBy({
-        by: ['followedUserId'],
-        where: { followedType: 'user', followedUserId: { in: userIds } },
-        _count: { followerId: true },
-      }),
       CompatibilityService.computeBatch(currentUserId, userIds),
     ]);
 
     const watchedMap = new Map(watchedRows.map((r) => [r.userId, r._count.titleId]));
-    const followerMap = new Map(
-      followerRows.map((r) => [r.followedUserId, r._count.followerId])
-    );
 
     const people = users.map((u) => {
       const id = u.id;
@@ -342,11 +315,9 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
         avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=6366f1&color=fff`,
         bio: u.bio || 'Movie enthusiast & CineCircle circle member',
         role: u.role,
-        isFollowing: followingIds.has(id),
         stats: {
           watchedCount: watchedMap.get(id) || 0,
           circlesCount: 0,
-          followersCount: followerMap.get(id) || 0,
         },
         matchScore: compat?.score ?? null,
         matchExplanation: compat?.explanation || '',
@@ -516,35 +487,6 @@ export const updateSubscribedServices = async (req: IAuthRequest, res: Response,
 };
 
 /**
- * Toggle follow/unfollow a user
- * POST /api/users/follow
- */
-export const toggleFollow = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const followerId = req.user?.id;
-    const { targetUserId } = req.body;
-
-    if (!followerId || !targetUserId) {
-      return next(new AppError('targetUserId is required', 400));
-    }
-
-    const relationship = await FollowService.toggle(followerId, targetUserId);
-
-    sendSuccess(
-      res,
-      {
-        following: relationship.isFollowing,
-        isFollowedBy: relationship.isFollowedBy,
-        isMutual: relationship.isMutual,
-      },
-      relationship.isFollowing ? 'Followed member' : 'Unfollowed member'
-    );
-  } catch (error: any) {
-    next(error instanceof FollowError ? new AppError(error.message, error.statusCode) : error);
-  }
-};
-
-/**
  * Full social graph for a member
  * GET /api/users/:userId/connections
  */
@@ -558,15 +500,13 @@ export const getConnections = async (req: IAuthRequest, res: Response, next: Nex
     }
 
     const [graph, counts] = await Promise.all([
-      FollowService.getGraph(userId),
-      FollowService.getCounts(userId),
+      ConnectionGraphService.getGraph(userId),
+      ConnectionGraphService.getCounts(userId),
     ]);
-
-    const relationship = await FollowService.getRelationship(req.user?.id, userId);
 
     sendSuccess(
       res,
-      { ...graph, counts, viewerRelationship: relationship },
+      { ...graph, counts },
       'Connections retrieved'
     );
   } catch (error) {
@@ -708,39 +648,6 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
         actionUrl: `/profile/${request.sender.id}`,
         createdAt: request.createdAt,
       });
-    }
-
-    // 3. Real Followers who followed this user
-    const recentFollowers = await prisma.follow.findMany({
-      where: {
-        followedType: 'user',
-        followedUserId: userId,
-      },
-      include: {
-        follower: { select: { id: true, name: true, avatar: true, handle: true, email: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 4,
-    });
-
-    for (const f of recentFollowers) {
-      if (f.follower) {
-        const followerName = f.follower.name || 'Community Member';
-        const followerAvatar = f.follower.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(followerName)}&background=6366f1&color=fff`;
-        notifications.push({
-          id: `follow-${f.id}`,
-          type: 'follow',
-          actorName: followerName,
-          actorAvatar: followerAvatar,
-          title: `started following you on CineCircle.`,
-          detail: f.follower.handle || `@${f.follower.name?.toLowerCase().replace(/\s+/g, '')}`,
-          timestamp: f.createdAt ? new Date(f.createdAt).toLocaleDateString() : 'Recent',
-          read: false,
-          actionUrl: `/profile/${f.follower.id}`,
-          actionText: 'View Profile',
-          createdAt: f.createdAt,
-        });
-      }
     }
 
     notifications.sort((a, b) => {

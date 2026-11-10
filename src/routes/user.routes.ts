@@ -7,7 +7,6 @@ import {
   updateTasteProfile,
   updateSubscribedServices,
   completeOnboarding,
-  toggleFollow,
   getConnections,
   getUserSuggestions,
   getNotifications,
@@ -31,7 +30,6 @@ router.get('/taste-profile', authenticate, getTasteProfile);
 router.put('/taste-profile', authenticate, updateTasteProfile);
 router.put('/subscribed-services', authenticate, updateSubscribedServices);
 router.post('/onboarding', authenticate, completeOnboarding);
-router.post('/follow', authenticate, toggleFollow);
 router.post('/connections/request', authenticate, requestConnection);
 router.post('/connections/respond', authenticate, respondToConnection);
 

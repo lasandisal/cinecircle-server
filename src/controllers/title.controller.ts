@@ -3,7 +3,7 @@ import prisma from '../config/prisma';
 import { tmdbService } from '../services/TmdbService';
 import { SeedService } from '../services/SeedService';
 import { SoundtrackService } from '../services/SoundtrackService';
-import { FollowService } from '../services/follow.service';
+import { ConnectionGraphService } from '../services/connection-graph.service';
 import { sendSuccess } from '../utils/response';
 import type { IAuthRequest } from '../types';
 
@@ -1216,22 +1216,22 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(30, Math.max(1, parseInt(limit as string, 10) || 10));
 
-    const feedFilter = req.query.filter === 'following' ? 'following' : 'all';
+    const feedFilter = req.query.filter === 'connections' ? 'connections' : 'all';
 
     const where: any = { parentId: null, hidden: false };
 
-    let followingIds: string[] = [];
-    if (feedFilter === 'following') {
-      followingIds = await FollowService.getFollowingIds(req.user?.id || '');
-      if (followingIds.length === 0) {
+    let connectionIds: string[] = [];
+    if (feedFilter === 'connections') {
+      connectionIds = await ConnectionGraphService.getConnectionIds(req.user?.id || '');
+      if (connectionIds.length === 0) {
         sendSuccess(
           res,
-          { posts: [], filter: feedFilter, followingCount: 0 },
-          'Follow some members to see their activity here'
+          { posts: [], filter: feedFilter, connectionsCount: 0 },
+          'Connect with members to see their activity here'
         );
         return;
       }
-      where.userId = { in: followingIds };
+      where.userId = { in: connectionIds };
     }
 
     const comments = await prisma.comment.findMany({
@@ -1271,9 +1271,9 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       replyRows.map((r) => [r.parentId || '', r._count.id])
     );
 
-    const myMutualIds = new Set<string>(
+    const myConnectionIds = new Set<string>(
       req.user
-        ? (await FollowService.getGraph(req.user.id)).mutuals.map((m: any) => m.id)
+        ? await ConnectionGraphService.getConnectionIds(req.user.id)
         : []
     );
 
@@ -1293,7 +1293,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
           handle: rawHandle,
           avatar: c.user?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorName)}&background=6366f1&color=fff`,
           mutualCount: 0,
-          isConnection: myMutualIds.has(c.userId),
+          isConnection: myConnectionIds.has(c.userId),
         },
         titleData: {
           id: c.title.id,
@@ -1348,7 +1348,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       }
     }
 
-    sendSuccess(res, { posts, filter: feedFilter, followingCount: followingIds.length }, 'Feed activity retrieved successfully');
+    sendSuccess(res, { posts, filter: feedFilter, connectionsCount: connectionIds.length }, 'Feed activity retrieved successfully');
   } catch (error) {
     next(error);
   }
