@@ -696,16 +696,16 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
       notifications.push({
         id: `connection-request-${request.id}`,
         type: 'follow',
+        requestId: request.id,
         actorName: senderName,
         actorAvatar:
           request.sender.avatar ||
           `https://ui-avatars.com/api/?name=${encodeURIComponent(senderName)}&background=6366f1&color=fff`,
         title: 'sent you a connection request.',
-        detail: request.sender.handle || 'Review their profile to respond',
+        detail: request.sender.handle || 'Accept or ignore this request',
         timestamp: request.createdAt ? new Date(request.createdAt).toLocaleDateString() : 'Recent',
         read: false,
         actionUrl: `/profile/${request.sender.id}`,
-        actionText: 'Review Request',
         createdAt: request.createdAt,
       });
     }
