@@ -28,8 +28,8 @@ flowchart TD
         Brevo["Brevo SMTP (Transactional OTP Emails)"]
     end
 
-    Client <-->|REST HTTP / JSON| Router
-    Client <-->|WebSockets (ws://)| SocketServer
+    Client <-->|"REST HTTP & JSON"| Router
+    Client <-->|"WebSockets"| SocketServer
     Router --> AuthMid --> Controllers
     Controllers --> Services
     Services --> PrismaClient --> Postgres
