@@ -265,9 +265,16 @@ export class SessionService {
         participants: { select: { id: true, name: true, avatar: true } },
       },
     });
+    const winningTitle = winnerId
+      ? await prisma.title.findUnique({ where: { id: winnerId } })
+      : null;
+    const formattedSession = formatSessionResponse(updated);
+    formattedSession.finalPick = winningTitle
+      ? { ...winningTitle, _id: winningTitle.id }
+      : null;
 
     return {
-      session: formatSessionResponse(updated),
+      session: formattedSession,
       winnerId,
       scores,
       aiPitch,
