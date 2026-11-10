@@ -85,7 +85,7 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
     const requestedParticipantIds = Array.isArray(selectedParticipantIds)
       ? selectedParticipantIds.filter((id: unknown): id is string => typeof id === 'string' && id !== userId)
       : [];
-    const selectedParticipants = requestedParticipantIds.length > 0
+    const selectedInvitees = requestedParticipantIds.length > 0
       ? await prisma.user.findMany({
           where: { id: { in: requestedParticipantIds } },
           select: { id: true },
@@ -123,18 +123,90 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
           maxRuntime: maxRuntime ? Number(maxRuntime) : undefined,
           moodFilter: moodFilter?.trim() || undefined,
         },
-        participants: {
-          connect: [
-            { id: userId },
-            ...selectedParticipants.map((participant) => ({ id: participant.id })),
-          ],
-        },
+        participants: { connect: { id: userId } },
       },
     });
+
+    if (selectedInvitees.length > 0) {
+      await prisma.sessionInvitation.createMany({
+        data: selectedInvitees.map((invitee) => ({
+          sessionId: session.id,
+          inviterId: userId,
+          inviteeId: invitee.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     const populatedSession = await getPopulatedSession(session.id);
 
     sendSuccess(res, { session: populatedSession, joinCode }, 'Group session created successfully', 201);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const inviteMembers = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = String(req.params.sessionId);
+    const memberIds = Array.isArray(req.body?.memberIds)
+      ? req.body.memberIds.filter((id: unknown): id is string => typeof id === 'string' && id !== userId)
+      : [];
+    if (!userId || memberIds.length === 0) {
+      return next(new AppError('At least one member is required', 400));
+    }
+
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { participants: { select: { id: true } } },
+    });
+    if (!session) return next(new AppError('Session room not found', 404));
+    if (session.creatorId !== userId) return next(new AppError('Only the host can invite members', 403));
+    if (session.status !== 'open') return next(new AppError('Cannot invite members after the decision is locked', 400));
+
+    const participantIds = new Set(session.participants.map((participant) => participant.id));
+    const invitees = await prisma.user.findMany({
+      where: { id: { in: memberIds.filter((id: string) => !participantIds.has(id)) } },
+      select: { id: true },
+    });
+    await prisma.sessionInvitation.createMany({
+      data: invitees.map((invitee) => ({ sessionId, inviterId: userId, inviteeId: invitee.id })),
+      skipDuplicates: true,
+    });
+    sendSuccess(res, { invitedCount: invitees.length }, 'Invitations sent');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const respondToSessionInvitation = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const invitationId = String(req.params.invitationId);
+    const status = req.body?.status;
+    if (!userId || !['accepted', 'rejected'].includes(status)) {
+      return next(new AppError('A valid invitation status is required', 400));
+    }
+
+    const invitation = await prisma.sessionInvitation.findUnique({
+      where: { id: invitationId },
+      include: { session: { select: { joinCode: true } } },
+    });
+    if (!invitation || invitation.inviteeId !== userId || invitation.status !== 'pending') {
+      return next(new AppError('Invitation not found', 404));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.sessionInvitation.update({ where: { id: invitationId }, data: { status } });
+      if (status === 'accepted') {
+        await tx.session.update({
+          where: { id: invitation.sessionId },
+          data: { participants: { connect: { id: userId } } },
+        });
+      }
+    });
+    sendSuccess(res, { status, joinCode: invitation.session.joinCode }, `Invitation ${status}`);
   } catch (error) {
     next(error);
   }
@@ -219,6 +291,32 @@ export const getActiveSessions = async (req: Request, res: Response, next: NextF
     });
 
     sendSuccess(res, { sessions: sanitized }, 'Active sessions retrieved');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete a watch circle. Only the host can delete it.
+ * DELETE /api/sessions/:sessionId
+ */
+export const deleteSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = String(req.params.sessionId);
+    if (!userId) return next(new AppError('Unauthorized', 401));
+
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { creatorId: true },
+    });
+    if (!session) return next(new AppError('Session room not found', 404));
+    if (session.creatorId !== userId) {
+      return next(new AppError('Only the room host can delete this circle', 403));
+    }
+
+    await prisma.session.delete({ where: { id: sessionId } });
+    sendSuccess(res, { sessionId }, 'Session deleted successfully');
   } catch (error) {
     next(error);
   }
@@ -395,10 +493,17 @@ export const addTitleToShortlist = async (req: IAuthRequest, res: Response, next
     sanitizeSessionPeople(populatedSession);
 
     const votes = await SessionService.getVotes(sessionId);
+    const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
+
+    SocketService.emitToSession(sessionId, 'shortlist:updated', {
+      sessionId,
+      session: populatedSession,
+      votes: safeVotes,
+    });
 
     sendSuccess(
       res,
-      { session: populatedSession, votes: votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) })) },
+      { session: populatedSession, votes: safeVotes },
       'Title added to session shortlist successfully'
     );
   } catch (error) {

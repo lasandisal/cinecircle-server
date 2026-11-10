@@ -618,7 +618,38 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
       });
     }
 
-    // 2. Pending connection requests addressed to this user
+    // 2. Pending circle invitations addressed to this user
+    const pendingInvitations = await prisma.sessionInvitation.findMany({
+      where: { inviteeId: userId, status: 'pending', session: { status: 'open' } },
+      include: {
+        session: { select: { id: true, name: true, joinCode: true, createdAt: true } },
+        inviter: { select: { id: true, name: true, avatar: true, handle: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 8,
+    });
+
+    for (const invitation of pendingInvitations) {
+      const inviterName = invitation.inviter.name || 'Community Member';
+      notifications.push({
+        id: `session-invitation-${invitation.id}`,
+        type: 'circle',
+        invitationId: invitation.id,
+        sessionId: invitation.session.id,
+        actorName: inviterName,
+        actorAvatar:
+          invitation.inviter.avatar ||
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(inviterName)}&background=6366f1&color=fff`,
+        title: `invited you to ${invitation.session.name || 'a watch circle'}.`,
+        detail: invitation.inviter.handle || `Room Code: #${invitation.session.joinCode}`,
+        timestamp: invitation.createdAt ? new Date(invitation.createdAt).toLocaleDateString() : 'Recent',
+        read: false,
+        actionText: 'Accept Invitation',
+        createdAt: invitation.createdAt,
+      });
+    }
+
+    // 3. Pending connection requests addressed to this user
     const pendingRequests = await prisma.connectionRequest.findMany({
       where: {
         recipientId: userId,

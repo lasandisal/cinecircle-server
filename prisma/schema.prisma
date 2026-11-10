@@ -30,6 +30,8 @@ model User {
   comments         Comment[]
   createdSessions  Session[]      @relation("CreatedSessions")
   joinedSessions   Session[]      @relation("SessionParticipants")
+  sentSessionInvitations SessionInvitation[] @relation("SessionInvitationSender")
+  receivedSessionInvitations SessionInvitation[] @relation("SessionInvitationRecipient")
   sentConnectionRequests     ConnectionRequest[] @relation("ConnectionRequestSender")
   receivedConnectionRequests ConnectionRequest[] @relation("ConnectionRequestRecipient")
   soundtracksAdded Soundtrack[]
@@ -73,8 +75,26 @@ model Session {
   creatorId    String
   creator      User     @relation("CreatedSessions", fields: [creatorId], references: [id])
   participants User[]   @relation("SessionParticipants")
+  invitations SessionInvitation[]
   votes        Vote[]
   createdAt    DateTime @default(now())
+}
+
+model SessionInvitation {
+  id          String   @id @default(uuid())
+  sessionId   String
+  inviterId   String
+  inviteeId   String
+  status      String   @default("pending") // "pending" | "accepted" | "rejected"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  inviter User @relation("SessionInvitationSender", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User @relation("SessionInvitationRecipient", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, inviteeId])
+  @@index([inviteeId, status])
 }
 
 model Vote {
