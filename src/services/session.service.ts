@@ -249,6 +249,7 @@ export class SessionService {
           console.warn('[SessionService] AI pitch generation failed, proceeding with fallback:', err.message);
           aiPitch = `The circle selected "${winningTitle.name}"! Perfect runtime and genre match for tonight.`;
         }
+
       }
     }
 
@@ -273,6 +274,26 @@ export class SessionService {
       ? { ...winningTitle, _id: winningTitle.id }
       : null;
 
+    if (winningTitle) {
+      const hostName = session.creator?.name || 'Watch Circle Host';
+      const hostAvatar =
+        session.creator?.avatar ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(hostName)}&background=f59e0b&color=fff`;
+      await prisma.notification.createMany({
+        data: session.participants.map((participant) => ({
+          userId: participant.id,
+          type: 'verdict',
+          actorName: hostName,
+          actorAvatar: hostAvatar,
+          title: `Your watch circle chose "${winningTitle.name}".`,
+          detail: session.name || `Room Code: #${session.joinCode}`,
+          actionUrl: `/group?code=${session.joinCode}`,
+          actionText: 'View Winner',
+          sessionId,
+        })),
+      });
+    }
+
     return {
       session: formattedSession,
       winnerId,
@@ -280,5 +301,35 @@ export class SessionService {
       aiPitch,
       aiPitchGenerated,
     };
+  }
+
+  /**
+   * Reopen a finalized room for another round while preserving its shortlist
+   * and room identity.
+   */
+  public static async reopen(sessionId: string, hostUserId: string) {
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: { participants: { select: { id: true } } },
+    });
+
+    if (!session) throw new SessionServiceError('Session not found', 404);
+    if (session.creatorId !== hostUserId) {
+      throw new SessionServiceError('Only the host can start a new round', 403);
+    }
+    if (session.status !== 'closed') {
+      throw new SessionServiceError('The room is already open', 409);
+    }
+
+    await prisma.vote.deleteMany({ where: { sessionId } });
+    return prisma.session.update({
+      where: { id: sessionId },
+      data: {
+        status: 'open',
+        winnerId: null,
+        finalPickId: null,
+        aiPitch: null,
+      },
+    });
   }
 }

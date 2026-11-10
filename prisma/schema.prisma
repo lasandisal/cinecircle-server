@@ -34,6 +34,7 @@ model User {
   receivedSessionInvitations SessionInvitation[] @relation("SessionInvitationRecipient")
   sentConnectionRequests     ConnectionRequest[] @relation("ConnectionRequestSender")
   receivedConnectionRequests ConnectionRequest[] @relation("ConnectionRequestRecipient")
+  notifications      Notification[]
   soundtracksAdded Soundtrack[]
 }
 
@@ -262,4 +263,22 @@ model Otp {
   createdAt DateTime @default(now())
 
   @@index([email])
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String
+  actorName   String
+  actorAvatar String
+  title       String
+  detail      String?
+  actionUrl   String?
+  actionText  String?
+  sessionId   String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

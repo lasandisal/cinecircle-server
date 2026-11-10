@@ -216,10 +216,18 @@ export const respondToSessionInvitation = async (req: IAuthRequest, res: Respons
  * Retrieve all currently active open sessions (for circles carousel)
  * GET /api/sessions/active
  */
-export const getActiveSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const getActiveSessions = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    const userId = req.user?.id;
     const sessions = await prisma.session.findMany({
-      where: { status: 'open' },
+      where: userId
+        ? {
+            OR: [
+              { status: 'open' },
+              { status: 'closed', participants: { some: { id: userId } } },
+            ],
+          }
+        : { status: 'open' },
       include: {
         creator: { select: { id: true, name: true, email: true, avatar: true } },
         participants: { select: { id: true, name: true, email: true, avatar: true } },
@@ -319,6 +327,30 @@ export const deleteSession = async (req: IAuthRequest, res: Response, next: Next
     sendSuccess(res, { sessionId }, 'Session deleted successfully');
   } catch (error) {
     next(error);
+  }
+};
+
+/**
+ * Reopen a completed watch circle for another voting round.
+ * POST /api/sessions/:sessionId/reopen
+ */
+export const reopenSession = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = String(req.params.sessionId);
+    if (!userId) return next(new AppError('Unauthorized', 401));
+
+    const updated = await SessionService.reopen(sessionId, userId);
+    const populatedSession = await getPopulatedSession(updated.id);
+    sanitizeSessionPeople(populatedSession);
+    const votes = await SessionService.getVotes(sessionId);
+    const safeVotes = votes.map((v: any) => ({ ...v, user: sanitizePeople(v.user) }));
+
+    const result = { session: populatedSession, votes: safeVotes };
+    SocketService.emitToSession(sessionId, 'session:reopened', result);
+    sendSuccess(res, result, 'New voting round started');
+  } catch (err: any) {
+    next(err instanceof SessionServiceError ? new AppError(err.message, err.statusCode) : err);
   }
 };
 

@@ -582,6 +582,21 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
 
     const notifications: any[] = [];
 
+    const storedNotifications = await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    notifications.push(
+      ...storedNotifications.map((notification) => ({
+        ...notification,
+        read: false,
+        timestamp: notification.createdAt
+          ? new Date(notification.createdAt).toLocaleDateString()
+          : 'Recently',
+      }))
+    );
+
     // 1. Open sessions where user is participating
     const userSessions = await prisma.session.findMany({
       where: {
@@ -618,48 +633,7 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
       });
     }
 
-    // 2. Recently finalized sessions notify every participant with the winner.
-    const finalizedSessions = await prisma.session.findMany({
-      where: {
-        participants: { some: { id: userId } },
-        status: 'closed',
-        finalPickId: { not: null },
-      },
-      include: {
-        creator: { select: { id: true, name: true, avatar: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 8,
-    });
-
-    for (const s of finalizedSessions) {
-      const hostName = s.creator?.name || 'Watch Circle Host';
-      const winner = s.finalPickId
-        ? await prisma.title.findUnique({
-            where: { id: s.finalPickId },
-            select: { name: true },
-          })
-        : null;
-      const winnerName = winner?.name || 'the selected title';
-      notifications.push({
-        id: `session-verdict-${s.id}`,
-        type: 'verdict',
-        actorName: hostName,
-        actorAvatar:
-          s.creator?.avatar ||
-          `https://ui-avatars.com/api/?name=${encodeURIComponent(hostName)}&background=f59e0b&color=fff`,
-        title: `Your watch circle chose "${winnerName}".`,
-        detail: s.name || `Room Code: #${s.joinCode}`,
-        timestamp: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Recently',
-        read: false,
-        actionUrl: `/group?code=${s.joinCode}`,
-        actionText: 'View Winner',
-        sessionId: s.id,
-        createdAt: s.createdAt,
-      });
-    }
-
-    // 3. Pending circle invitations addressed to this user
+    // 2. Pending circle invitations addressed to this user
     const pendingInvitations = await prisma.sessionInvitation.findMany({
       where: { inviteeId: userId, status: 'pending', session: { status: 'open' } },
       include: {
@@ -690,7 +664,7 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
       });
     }
 
-    // 4. Pending connection requests addressed to this user
+    // 3. Pending connection requests addressed to this user
     const pendingRequests = await prisma.connectionRequest.findMany({
       where: {
         recipientId: userId,
