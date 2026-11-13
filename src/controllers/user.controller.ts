@@ -564,7 +564,8 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
       // Exclude the viewer and any users who are already accepted connections,
       // so existing connections don't show up as taste-match suggestions.
       const connectionIds = await ConnectionGraphService.getConnectionIds(currentUserId);
-      where.id = { not: [currentUserId, ...connectionIds] };
+      // where.id = { not: [currentUserId, ...connectionIds] };
+      where.id = { notIn: [currentUserId, ...connectionIds] };
     }
 
     const users = await prisma.user.findMany({

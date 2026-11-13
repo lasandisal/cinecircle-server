@@ -4,7 +4,7 @@ import app, { isAllowedOrigin } from './app';
 import { ENV } from './config/env';
 import prisma from './config/prisma';
 import { SocketService } from './services/socket.service';
-import { SeedService } from './services/SeedService';
+import { SeedService } from './services/seed.service';
 
 /**
  * ==========================================

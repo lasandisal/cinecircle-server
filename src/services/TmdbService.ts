@@ -5,6 +5,7 @@ import type { SeedTitleData } from '../data/seedTitles';
 
 export interface FormattedTmdbTitle {
   tmdbId: number;
+  imdbId?: string;
   name: string;
   originalName?: string;
   type: 'film' | 'tv';
@@ -459,7 +460,7 @@ class TmdbService {
         const response = await axios.get(
           endpoint,
           this.getRequestConfig({
-            append_to_response: 'credits,watch/providers',
+            append_to_response: 'credits,watch/providers,external_ids',
           })
         );
 
@@ -618,6 +619,7 @@ class TmdbService {
           cast,
           watchProviders: watchProviders.length > 0 ? watchProviders : (fallbackMatch?.watchProviders || []),
           seasons,
+          imdbId: data.external_ids?.imdb_id || data.imdb_id || undefined,
         };
       } catch (err: any) {
         // Continue to try the alternate type (movie vs tv)
@@ -627,6 +629,26 @@ class TmdbService {
 
     console.warn(`[TmdbService] TMDB ID ${tmdbId} not found under movie or tv, using fallback`);
     return (fallbackMatch as FormattedTmdbTitle) || null;
+  }
+
+  /**
+   * Fetch external IDs (including IMDb ID) for a movie or TV show from TMDB
+   */
+  public async fetchExternalIds(
+    tmdbId: number,
+    type?: 'film' | 'tv' | 'movie' | string
+  ): Promise<{ imdb_id?: string } | null> {
+    if (!this.hasApiKey()) return null;
+    const tmdbType = type === 'tv' ? 'tv' : 'movie';
+    try {
+      const response = await axios.get(
+        `${TMDB_BASE_URL}/${tmdbType}/${tmdbId}/external_ids`,
+        this.getRequestConfig()
+      );
+      return response.data || null;
+    } catch {
+      return null;
+    }
   }
 
   /**

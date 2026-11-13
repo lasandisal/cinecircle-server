@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../config/prisma';
-import { tmdbService } from '../services/TmdbService';
-import { SeedService } from '../services/SeedService';
-import { SoundtrackService } from '../services/SoundtrackService';
+import { tmdbService } from '../services/tmdb.service';
+import { SeedService } from '../services/seed.service';
+import { SoundtrackService } from '../services/soundtrack.service';
 import { ConnectionGraphService } from '../services/connection-graph.service';
 import { sendSuccess } from '../utils/response';
 import type { IAuthRequest } from '../types';
+import { OmdbService } from '../services/omdb.service';
 
 const SOUNDTRACK_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
 const SEASON_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -441,6 +442,7 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
                 voteAverage: tmdbData.voteAverage,
                 moodTags: tmdbData.moodTags || [],
                 cast: tmdbData.cast as any,
+                imdbId: tmdbData.imdbId || undefined,
               },
             });
 
@@ -482,6 +484,27 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
     }
 
     const titleObjId = title.id;
+    // ==========================================
+    // OMDB ENRICHMENT INTEGRATION
+    // ==========================================
+    if (titleObjId) {
+      try {
+        const enriched = await OmdbService.enrichTitle(titleObjId);
+        if (enriched) {
+          title = {
+            ...title,
+            imdbId: enriched.imdbId ?? title.imdbId,
+            imdbRating: enriched.imdbRating ?? title.imdbRating,
+            imdbVotes: enriched.imdbVotes ?? title.imdbVotes,
+            rottenTomatoesRating: enriched.rottenTomatoesRating ?? title.rottenTomatoesRating,
+          };
+        }
+      } catch (err: any) {
+        console.warn('[getTitleDetails] OMDb enrichment failed:', err.message);
+      }
+    }
+    // ==========================================
+
     let [watchProviders, seasons, soundtracks, allComments, watcherDocs] = titleObjId
       ? await Promise.all([
           prisma.watchProvider.findMany({ where: { titleId: titleObjId } }),

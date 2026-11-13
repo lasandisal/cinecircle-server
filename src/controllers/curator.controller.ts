@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import { IAuthRequest } from '../types';
 import { sendSuccess } from '../utils/response';
 import prisma from '../config/prisma';
-import { SoundtrackService } from '../services/SoundtrackService';
+import { SoundtrackService } from '../services/soundtrack.service';
 import { AppError } from '../middleware/error.middleware';
 import axios from 'axios';
 import { ENV } from '../config/env';

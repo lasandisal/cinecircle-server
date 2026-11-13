@@ -1,4 +1,4 @@
-import { tmdbService } from './TmdbService';
+import { tmdbService } from './Tmdbservice';
 
 /**
  * Backwards-compatible alias.

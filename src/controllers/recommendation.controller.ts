@@ -468,7 +468,7 @@ import { sendSuccess } from '../utils/response';
 import { AiService } from '../services/ai.service';
 import type { VibeParseResult, CandidateEvaluation, CandidateForEval } from '../services/ai.service';
 import { RecommendationService } from '../services/recommendation.service';
-import { tmdbService } from '../services/TmdbService';
+import { tmdbService } from '../services/Tmdbservice';
 import type { IAuthRequest } from '../types';
 
 const MOOD_GENRES: Record<string, string[]> = {

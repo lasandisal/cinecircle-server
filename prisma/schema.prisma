@@ -40,7 +40,14 @@ model User {
 
 model Title {
   id             String   @id @default(uuid())
-  tmdbId         Int      @unique
+  
+  tmdbId                Int       @unique
+  imdbId                String?
+  imdbRating            Float?
+  imdbVotes             Int?
+  rottenTomatoesRating  Int?      // Stored as percentage, e.g. 94
+  ratingsUpdatedAt      DateTime?
+
   name           String
   originalName   String?
   type           String // "movie" | "tv" | "film"

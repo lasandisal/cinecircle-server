@@ -6,7 +6,7 @@ import { ENV } from '../config/env';
 import { IAuthRequest } from '../types';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
-import { EmailService } from '../services/EmailService';
+import { EmailService } from '../services/email.service';
 
 /**
  * Generate JWT token helper

@@ -3,7 +3,7 @@ import { IAuthRequest } from '../types';
 import prisma from '../config/prisma';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
-import { tmdbService } from '../services/TmdbService';
+import { tmdbService } from '../services/Tmdbservice';
 import { SessionService, SessionServiceError } from '../services/session.service';
 import { SocketService } from '../services/socket.service';
 
