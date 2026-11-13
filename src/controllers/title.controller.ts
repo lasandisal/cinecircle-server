@@ -1262,7 +1262,15 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       if (connectionIds.length === 0) {
         sendSuccess(
           res,
-          { posts: [], filter: feedFilter, connectionsCount: 0 },
+          {
+            posts: [],
+            filter: feedFilter,
+            connectionsCount: 0,
+            page: pageNum,
+            limit: limitNum,
+            total: 0,
+            hasMore: false,
+          },
           'Connect with members to see their activity here'
         );
         return;
@@ -1270,16 +1278,22 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       where.userId = { in: connectionIds };
     }
 
-    const comments = await prisma.comment.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, avatar: true, handle: true, email: true } },
-        title: { select: { id: true, name: true, posterUrl: true, releaseYear: true, type: true, genres: true, runtimeMinutes: true, voteAverage: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip: (pageNum - 1) * limitNum,
-      take: limitNum,
-    });
+    // Count the whole result set, not the page: rows whose title/user was
+    // deleted are filtered out below, so `posts.length < limit` alone would
+    // wrongly signal the end of the feed.
+    const [comments, totalCount] = await Promise.all([
+      prisma.comment.findMany({
+        where,
+        include: {
+          user: { select: { id: true, name: true, avatar: true, handle: true, email: true } },
+          title: { select: { id: true, name: true, posterUrl: true, releaseYear: true, type: true, genres: true, runtimeMinutes: true, voteAverage: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+      prisma.comment.count({ where }),
+    ]);
 
     const feedTitleIds = Array.from(
       new Set(comments.map((c) => c.titleId).filter(Boolean))
@@ -1384,7 +1398,19 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       }
     }
 
-    sendSuccess(res, { posts, filter: feedFilter, connectionsCount: connectionIds.length }, 'Feed activity retrieved successfully');
+    sendSuccess(
+      res,
+      {
+        posts,
+        filter: feedFilter,
+        connectionsCount: connectionIds.length,
+        page: pageNum,
+        limit: limitNum,
+        total: totalCount,
+        hasMore: pageNum * limitNum < totalCount,
+      },
+      'Feed activity retrieved successfully'
+    );
   } catch (error) {
     next(error);
   }
