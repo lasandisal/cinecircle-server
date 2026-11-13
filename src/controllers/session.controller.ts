@@ -324,6 +324,11 @@ export const deleteSession = async (req: IAuthRequest, res: Response, next: Next
     }
 
     await prisma.session.delete({ where: { id: sessionId } });
+
+    // Anyone still inside the room would otherwise be stranded on a circle
+    // that no longer exists. Tell them so the client can exit and notify.
+    SocketService.emitToSession(sessionId, 'session:deleted', { sessionId });
+
     sendSuccess(res, { sessionId }, 'Session deleted successfully');
   } catch (error) {
     next(error);
