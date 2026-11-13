@@ -224,7 +224,16 @@ export const updateProfile = async (req: IAuthRequest, res: Response, next: Next
       return next(new AppError('Unauthorized', 401));
     }
 
-    const { name, bio, handle, avatar, subscribedServices } = req.body;
+    const {
+      name,
+      bio,
+      handle,
+      avatar,
+      subscribedServices,
+      favoriteGenres = [],
+      exclusions = [],
+      favoriteTitles = [],
+    } = req.body;
 
     const data: any = {};
     if (name && typeof name === 'string') data.name = name.trim();
@@ -241,9 +250,38 @@ export const updateProfile = async (req: IAuthRequest, res: Response, next: Next
       data,
     });
 
+    // Upsert taste profile — tastes change over time, so this is always
+    // writable from the edit profile modal (not just first-time onboarding).
+    const tasteProfile = await prisma.tasteProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        favoriteGenres,
+        exclusions,
+        favoriteTitleIds: favoriteTitles,
+        updatedAt: new Date(),
+      },
+      update: {
+        favoriteGenres,
+        exclusions,
+        favoriteTitleIds: favoriteTitles,
+        updatedAt: new Date(),
+      },
+    });
+
+    if (favoriteGenres.length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { onboarded: true },
+      }).catch(() => null);
+    }
+
     sendSuccess(
       res,
-      { user: { ...updatedUser, _id: updatedUser.id } },
+      {
+        user: { ...updatedUser, _id: updatedUser.id },
+        tasteProfile: { ...tasteProfile, _id: tasteProfile.id },
+      },
       'Profile updated successfully'
     );
   } catch (error) {
