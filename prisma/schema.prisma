@@ -36,6 +36,7 @@ model User {
   receivedConnectionRequests ConnectionRequest[] @relation("ConnectionRequestRecipient")
   notifications      Notification[]
   soundtracksAdded Soundtrack[]
+  likes              Like[] @relation("UserLikes")
 }
 
 model Title {
@@ -238,10 +239,24 @@ model Comment {
   user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies Comment[] @relation("CommentReplies")
+  likes   Like[]    @relation("CommentLikes")
 
   @@index([titleId])
   @@index([reported])
   @@index([hidden])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  commentId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation("UserLikes", fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation("CommentLikes", fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+  @@index([commentId])
 }
 
 model ConnectionRequest {

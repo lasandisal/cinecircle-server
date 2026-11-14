@@ -5,6 +5,7 @@ import { SeedService } from '../services/seed.service';
 import { SoundtrackService } from '../services/soundtrack.service';
 import { ConnectionGraphService } from '../services/connection-graph.service';
 import { sendSuccess } from '../utils/response';
+import { AppError } from '../middleware/error.middleware';
 import type { IAuthRequest } from '../types';
 import { OmdbService } from '../services/omdb.service';
 
@@ -30,7 +31,7 @@ function isGeneratedSummary(summary?: string): boolean {
   );
 }
 
-function groupCommentsForDisplay(comments: any[], viewerId?: string): any[] {
+function groupCommentsForDisplay(comments: any[], viewerId?: string, likedCommentIds?: Set<string>): any[] {
   const parents: any[] = [];
   const replies = new Map<string, any[]>();
 
@@ -43,6 +44,7 @@ function groupCommentsForDisplay(comments: any[], viewerId?: string): any[] {
       user: c.user ? { ...c.user, _id: c.user.id } : null,
       reportCount: c.reportCount || reports.length,
       reportedByMe: viewerId ? reports.some((r: any) => (r.user?.id || r.userId || r.user)?.toString() === viewerId) : false,
+      likedByMe: likedCommentIds ? likedCommentIds.has(c.id) : false,
     };
   };
 
@@ -969,6 +971,8 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
 export const getComments = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const titleId = String(req.params.titleId);
+    const viewerId = req.user?.id;
+
     const allComments = await prisma.comment.findMany({
       where: { titleId, hidden: false },
       include: {
@@ -977,7 +981,18 @@ export const getComments = async (req: IAuthRequest, res: Response, next: NextFu
       orderBy: { createdAt: 'asc' },
     });
 
-    const commentsWithReplies = groupCommentsForDisplay(allComments, req.user?.id);
+    // Fetch which comments the current viewer has already liked
+    let likedCommentIds = new Set<string>();
+    if (viewerId && allComments.length > 0) {
+      const commentIds = allComments.map((c) => c.id);
+      const likes = await prisma.like.findMany({
+        where: { userId: viewerId, commentId: { in: commentIds } },
+        select: { commentId: true },
+      });
+      likedCommentIds = new Set(likes.map((l) => l.commentId));
+    }
+
+    const commentsWithReplies = groupCommentsForDisplay(allComments, viewerId, likedCommentIds);
 
     sendSuccess(res, { comments: commentsWithReplies }, 'Comments retrieved');
   } catch (error) {
@@ -988,18 +1003,154 @@ export const getComments = async (req: IAuthRequest, res: Response, next: NextFu
 /**
  * Like a discussion comment
  */
-export const likeComment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+/**
+ * Toggle like on a comment (like if not liked, unlike if already liked).
+ * POST /api/comments/:commentId/like
+ */
+export const likeComment = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const commentId = String(req.params.commentId);
-    const comment = await prisma.comment.update({
-      where: { id: commentId },
-      data: { likesCount: { increment: 1 } },
-      include: {
-        user: { select: { id: true, name: true, email: true, role: true, avatar: true } },
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    const existingLike = await prisma.like.findUnique({
+      where: {
+        userId_commentId: {
+          userId,
+          commentId,
+        },
       },
     });
 
-    sendSuccess(res, { comment: { ...comment, _id: comment.id, user: comment.user ? { ...comment.user, _id: comment.user.id } : null } }, 'Comment liked');
+    let isLiked: boolean;
+    let likesCount: number;
+
+    if (existingLike) {
+      // Unlike: remove the like record and decrement count
+      await prisma.$transaction([
+        prisma.like.delete({
+          where: { id: existingLike.id },
+        }),
+        prisma.comment.update({
+          where: { id: commentId },
+          data: { likesCount: { decrement: 1 } },
+        }),
+      ]);
+      isLiked = false;
+      const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+      likesCount = comment?.likesCount ?? 0;
+    } else {
+      // Like: create the like record and increment count
+      await prisma.$transaction([
+        prisma.like.create({
+          data: { userId, commentId },
+        }),
+        prisma.comment.update({
+          where: { id: commentId },
+          data: { likesCount: { increment: 1 } },
+        }),
+      ]);
+      isLiked = true;
+      const comment = await prisma.comment.findUnique({ where: { id: commentId } });
+      likesCount = comment?.likesCount ?? 0;
+    }
+
+    sendSuccess(
+      res,
+      { commentId, isLiked, likesCount },
+      isLiked ? 'Comment liked' : 'Comment unliked'
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get users who liked a comment.
+ * GET /api/comments/:commentId/likers
+ */
+export const getCommentLikers = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const { page = '1', limit = '20' } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 20));
+
+    const [likers, total] = await Promise.all([
+      prisma.like.findMany({
+        where: { commentId },
+        include: {
+          user: { select: { id: true, name: true, avatar: true, handle: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+      prisma.like.count({ where: { commentId } }),
+    ]);
+
+    sendSuccess(
+      res,
+      {
+        likers: likers.map((l) => l.user),
+        total,
+        page: pageNum,
+        limit: limitNum,
+        hasMore: pageNum * limitNum < total,
+      },
+      'Comment likers retrieved'
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get replies to a comment.
+ * GET /api/comments/:commentId/replies
+ */
+export const getCommentReplies = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const commentId = String(req.params.commentId);
+    const { page = '1', limit = '20' } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 20));
+
+    const [replies, total] = await Promise.all([
+      prisma.comment.findMany({
+        where: { parentId: commentId, hidden: false },
+        include: {
+          user: { select: { id: true, name: true, avatar: true, handle: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+      prisma.comment.count({ where: { parentId: commentId, hidden: false } }),
+    ]);
+
+    sendSuccess(
+      res,
+      {
+        replies: replies.map((r) => ({
+          id: r.id,
+          user: {
+            name: r.user.name,
+            avatar: r.user.avatar,
+            handle: r.user.handle,
+          },
+          text: r.text,
+          createdAt: r.createdAt,
+        })),
+        total,
+        page: pageNum,
+        limit: limitNum,
+        hasMore: pageNum * limitNum < total,
+      },
+      'Comment replies retrieved'
+    );
   } catch (error) {
     next(error);
   }
@@ -1102,6 +1253,11 @@ export const voteCommentPoll = async (req: IAuthRequest, res: Response, next: Ne
     const commentId = String(req.params.commentId);
     const { optionIndex } = req.body;
     const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required to vote' });
+      return;
+    }
 
     const comment = await prisma.comment.findUnique({ where: { id: commentId } });
     const poll = comment?.poll as any;
@@ -1350,6 +1506,16 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
         : []
     );
 
+    // Fetch which feed posts the current viewer has already liked
+    const myLikedFeedCommentIds = new Set<string>();
+    if (req.user && feedCommentIds.length > 0) {
+      const myFeedLikes = await prisma.like.findMany({
+        where: { userId: req.user.id, commentId: { in: feedCommentIds } },
+        select: { commentId: true },
+      });
+      myFeedLikes.forEach((l) => myLikedFeedCommentIds.add(l.commentId));
+    }
+
     const visibleComments = comments.filter((c) => c.title != null && c.user != null);
 
     const posts = visibleComments.map((c) => {
@@ -1361,6 +1527,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       return {
         id: c.id,
         _id: c.id,
+        likedByMe: myLikedFeedCommentIds.has(c.id),
         author: {
           name: authorName,
           handle: rawHandle,
@@ -1389,6 +1556,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
               options: (poll.options || []).map((opt: any) => ({
                 text: opt.optionText,
                 votesCount: opt.votes?.length || 0,
+                userHasVoted: req.user ? opt.votes?.includes(req.user.id) || false : false,
               })),
             }
           : undefined,

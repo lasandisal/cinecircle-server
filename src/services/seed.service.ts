@@ -128,69 +128,6 @@ export class SeedService {
       }
     }
 
-    if (adminUser) {
-      const dune = await prisma.title.findFirst({ where: { name: 'Dune: Part Two' } });
-      if (dune) {
-        const commentExists = await prisma.comment.findFirst({ where: { titleId: dune.id } });
-        if (!commentExists) {
-          await prisma.comment.create({
-            data: {
-              titleId: dune.id,
-              userId: adminUser.id,
-              text: 'The sound design in IMAX was absolute perfection! Greig Fraser and Hans Zimmer created a masterclass.',
-              rating: 5,
-              likesCount: 38,
-              containsSpoilers: false,
-            },
-          });
-        }
-      }
-
-      const theBear = await prisma.title.findFirst({ where: { name: 'The Bear' } });
-      if (theBear) {
-        const bearComment = await prisma.comment.findFirst({ where: { titleId: theBear.id } });
-        if (!bearComment) {
-          await prisma.comment.create({
-            data: {
-              titleId: theBear.id,
-              userId: adminUser.id,
-              text: 'Season 1 Episode 7 "Review" is twenty minutes of non-stop adrenaline. Incredible directing!',
-              rating: 5,
-              likesCount: 29,
-              containsSpoilers: false,
-            },
-          });
-        }
-      }
-
-      const strangerThings = await prisma.title.findFirst({ where: { name: 'Stranger Things' } });
-      if (strangerThings) {
-        const stComment = await prisma.comment.findFirst({ where: { titleId: strangerThings.id } });
-        if (!stComment) {
-          await prisma.comment.create({
-            data: {
-              titleId: strangerThings.id,
-              userId: adminUser.id,
-              text: 'Running Up That Hill in S4E4 is one of the greatest television sequences of the decade. The Duffer Brothers delivered cinema-grade quality.',
-              rating: 5,
-              likesCount: 42,
-              containsSpoilers: false,
-            },
-          });
-          await prisma.comment.create({
-            data: {
-              titleId: strangerThings.id,
-              userId: adminUser.id,
-              text: 'Eddie Munson playing Metallica in the Upside Down is iconic forever.',
-              rating: 5,
-              likesCount: 27,
-              containsSpoilers: true,
-            },
-          });
-        }
-      }
-    }
-
     console.log(`[SeedService] Finished seeding ${titlesSeeded} titles and ${providersSeeded} watch providers into PostgreSQL.`);
     return { titlesCount: titlesSeeded, providersCount: providersSeeded };
   }
