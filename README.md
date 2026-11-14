@@ -68,7 +68,7 @@ flowchart TD
 - **Weighted Compromise Algorithm**: Calculates a fairness score balancing unanimous approval against individual vetoes.
 
 ### 2.4 Gemini AI Consensus Moderator
-- Integrates **Google Generative AI (`gemini-flash-latest`)**.
+- Integrates **Google Generative AI (`gemini-3.5-flash-lite`)**.
 - When a group session finishes, Gemini analyzes the winner synopsis and individual member votes to write a witty, charismatic compromise pitch acknowledging diverse tastes and encouraging the room to press play.
 - Graceful template fallback if external API limits are reached.
 
@@ -76,6 +76,12 @@ flowchart TD
 - **Taste Compatibility**: Mathematical formula comparing overlapping genre scores and mutual watchlist titles between two members (returns `0-100% match`).
 - **Social Feed**: Aggregates reviews, ratings, and active circles from followed members and community trends.
 - **Followers & Connections**: Bidirectional connection requests and unidirectional follows with real-time counters.
+- **Instagram-Style Feed Interactions**:
+  - **Like Toggle**: Users can like/unlike comments; each like is recorded per user (prevents double-liking).
+  - **Likers List**: Click like count to see who liked a comment (returns user profiles).
+  - **Replies List**: Click comment count to see replies to a comment.
+  - **Member Search**: Search users by name, email, or handle with compatibility scoring.
+  - **Member Profiles**: Instagram-style profile pages showing watched/reviewed titles, connections, and mutual titles.
 
 ### 2.6 Enthusiast Layer & Soundtrack Hub
 - Comprehensive title profiles with cast mappings, episode guides, and streaming provider badges.
@@ -104,7 +110,7 @@ flowchart TD
 
 ## 4. Database Schema (Prisma ORM)
 
-The relational schema is configured in `prisma/schema.prisma` with 15 interconnected models:
+The relational schema is configured in `prisma/schema.prisma` with **16 interconnected models**:
 
 ```mermaid
 erDiagram
@@ -115,6 +121,7 @@ erDiagram
     User ||--o{ Comment : "authors"
     User ||--o{ TasteProfile : "has"
     User ||--o{ Otp : "receives"
+    User ||--o{ Like : "likes"
     
     Session ||--o{ Vote : "contains"
     Session }o--o{ User : "participants"
@@ -125,9 +132,13 @@ erDiagram
     Title ||--o{ SeasonEpisode : "contains"
     Title ||--o{ Soundtrack : "features"
     Title ||--o{ Comment : "discussed_in"
+    
+    Comment ||--o{ Like : "liked_by"
+    Comment }o--o{ Comment : "replies_to"
 ```
 
 ### Models Overview
+
 1. **`User`**: Account identity, hashed credentials, role (`user` | `curator` | `admin`), avatar, bio, subscribed streaming services, fatigue count, and onboarding status.
 2. **`Title`**: Movies and TV shows synchronized from TMDB with synopsis, runtime, release year, genres (`TEXT[]`), mood tags (`TEXT[]`), and cast JSON.
 3. **`Session`**: Group decision watch rooms with join code, constraints (mood, runtime), shortlist title IDs, status (`open` | `closed`), and winner title ID.
@@ -135,14 +146,15 @@ erDiagram
 5. **`Watchlist`**: Saved titles, watched status flag, and user star rating (1–10).
 6. **`WatchHistory`**: Historical user interaction logs (watched, rated, skipped, picked).
 7. **`TasteProfile`**: Recency-weighted per-genre scores and favorite seed titles.
-8. **`Comment`**: Community discussion posts supporting spoilers, star ratings, and emoji reactions.
-9. **`Soundtrack`**: Curated scene-by-scene soundtracks with Spotify and preview URLs.
-10. **`SeasonEpisode`**: Breakdown of TV seasons, episode summaries, and air dates.
-11. **`WatchProvider`**: Streaming provider regional availability (Netflix, Prime Video, etc.).
-12. **`ConnectionRequest`**: Friend/social invitations with status tracking (`pending`, `accepted`).
-13. **`Otp`**: Time-limited verification codes for secure passwordless authentication.
-14. **`Notification`**: Social alerts for mentions, comments, and room invites.
-15. **`SessionInvitation`**: Direct watch room invitations dispatched to friends.
+8. **`Comment`**: Community discussion posts supporting spoilers, star ratings, emoji reactions, embedded polls, and nested replies.
+9. **`Like`**: Individual user like on a comment (prevents double-liking via `@@unique([userId, commentId])`).
+10. **`Soundtrack`**: Curated scene-by-scene soundtracks with Spotify and preview URLs.
+11. **`SeasonEpisode`**: Breakdown of TV seasons, episode summaries, and air dates.
+12. **`WatchProvider`**: Streaming provider regional availability (Netflix, Prime Video, etc.).
+13. **`ConnectionRequest`**: Friend/social invitations with status tracking (`pending`, `accepted`).
+14. **`Otp`**: Time-limited verification codes for secure passwordless authentication.
+15. **`Notification`**: Social alerts for mentions, comments, and room invites.
+16. **`SessionInvitation`**: Direct watch room invitations dispatched to friends.
 
 ---
 
@@ -165,6 +177,10 @@ All routes are prefixed with `/api`.
 - `GET /api/titles/:id` — Full title details including cast, providers, soundtracks, and episodes.
 - `POST /api/titles/:id/comments` — Post review/comment with spoiler tag.
 - `POST /api/titles/:id/comments/:commentId/reaction` — React with emoji (🔥, 🍿, ❤️, etc.).
+- `POST /api/titles/:id/comments/:commentId/poll/vote` — Vote on a comment poll.
+- `POST /api/titles/comments/:commentId/like` — Toggle like on a comment (like/unlike).
+- `GET /api/titles/comments/:commentId/likers` — Get users who liked a comment.
+- `GET /api/titles/comments/:commentId/replies` — Get replies to a comment.
 
 ### 5.4 Recommendations (`/api/recommendations`)
 - `POST /api/recommendations/solo` — Generate high-confidence shortlist based on time, mood, and streaming passes.
@@ -183,6 +199,7 @@ All routes are prefixed with `/api`.
 - `GET /api/watchlist` — Retrieve authenticated user's watchlist with filtering.
 - `POST /api/watchlist` — Add title to watchlist or update rating.
 - `DELETE /api/watchlist/:id` — Remove item from watchlist.
+- `GET /api/users/search?q=...` — Search community members by name, email, or handle.
 - `GET /api/users/:userId/profile` — View user profile, badges, and mutual-watched compatibility.
 - `POST /api/users/:userId/follow` — Follow or unfollow a community member.
 - `GET /api/users/:userId/connections` — Fetch user's social connection graph.
@@ -240,8 +257,16 @@ All routes are prefixed with `/api`.
    JWT_SECRET="generate_a_random_secure_secret_key"
    CLIENT_URL="http://localhost:5173"
    TMDB_API_KEY="your_tmdb_api_key"
+   TMDB_ACCESS_TOKEN="your_tmdb_access_token"
    GEMINI_API_KEY="your_gemini_api_key"
+   GEMINI_REQUEST_TIMEOUT_MS=15000
+   GEMINI_EVAL_TIMEOUT_MS=20000
+   GEMINI_MODEL=gemini-3.5-flash-lite
    BREVO_SMTP_KEY="your_brevo_smtp_api_key"
+   BREVO_SMTP_LOGIN="your_brevo_login"
+   BREVO_SMTP_PORT=587
+   BREVO_SENDER_EMAIL="noreply@cinecircle.com"
+   BREVO_SENDER_NAME="CineCircle"
    ```
 
 4. Run Database Migrations:
@@ -289,6 +314,7 @@ cinecircle-be/
 │   │   ├── auth.middleware.ts
 │   │   └── error.middleware.ts
 │   ├── routes/              # Modular Express routing endpoints
+│   │   └── title.routes.ts
 │   ├── services/            # Core business logic & external integrations
 │   │   ├── ai.service.ts              # Google Gemini compromise pitches
 │   │   ├── EmailService.ts            # Brevo SMTP OTP delivery
