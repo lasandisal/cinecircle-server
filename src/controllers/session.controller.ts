@@ -92,17 +92,13 @@ export const createSession = async (req: IAuthRequest, res: Response, next: Next
         })
       : [];
 
-    let candidateIds: string[] = Array.isArray(shortlistTitleIds) && shortlistTitleIds.length > 0 ? shortlistTitleIds : [];
-
-    // If no candidate titles were selected, automatically seed with 4 top real titles from PostgreSQL
-    if (candidateIds.length === 0) {
-      const titles = await prisma.title.findMany({
-        orderBy: { voteAverage: 'desc' },
-        take: 4,
-        select: { id: true },
-      });
-      candidateIds = titles.map((t) => t.id);
-    }
+    // The shortlist starts EMPTY. Titles are added explicitly by the host
+    // (or the room picks them together). It used to auto-seed with the 4
+    // top-rated titles, which silently put films in front of the group that
+    // nobody chose.
+    let candidateIds: string[] = Array.isArray(shortlistTitleIds) && shortlistTitleIds.length > 0
+      ? shortlistTitleIds
+      : [];
 
     // Generate unique join code
     let joinCode = generateJoinCode();
@@ -219,22 +215,23 @@ export const respondToSessionInvitation = async (req: IAuthRequest, res: Respons
 export const getActiveSessions = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessions = await prisma.session.findMany({
-      where: userId
-        ? {
-            OR: [
-              { status: 'open' },
-              { status: 'closed', participants: { some: { id: userId } } },
-            ],
-          }
-        : { status: 'open' },
-      include: {
-        creator: { select: { id: true, name: true, email: true, avatar: true } },
-        participants: { select: { id: true, name: true, email: true, avatar: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    });
+
+    // The join code IS the access token for a circle. Listing every open circle
+    // to everybody handed that code out for free (the UI linked straight to
+    // /group?code=XXX, so clicking a circle auto-joined you). The list now
+    // only contains circles the viewer is actually part of. Everyone else has
+    // to enter the 6-character code to get in.
+    const sessions = userId
+      ? await prisma.session.findMany({
+          where: { participants: { some: { id: userId } } },
+          include: {
+            creator: { select: { id: true, name: true, email: true, avatar: true } },
+            participants: { select: { id: true, name: true, email: true, avatar: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        })
+      : [];
 
     const sessionIds = sessions.map((s) => s.id);
     const votes = sessionIds.length
