@@ -147,7 +147,7 @@ export class OmdbService {
       // If imdbId is missing, query TMDB external_ids
       if (!imdbId && title.tmdbId) {
         try {
-          const externalIds = await tmdbService.fetchExternalIds(title.tmdbId, title.type);
+          const externalIds = await tmdbService.fetchExternalIds(title.tmdbId, title.type as 'film' | 'tv');
           if (externalIds?.imdb_id) {
             imdbId = externalIds.imdb_id;
             await prisma.title.update({

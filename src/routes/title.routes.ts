@@ -9,6 +9,7 @@ import {
   seedTitles,
   addComment,
   getComments,
+  likeTitle,
   likeComment,
   getCommentLikers,
   getCommentReplies,
@@ -47,6 +48,7 @@ router.get('/:titleId/seasons/:seasonNumber', getSeasonEpisodes);
 router.post('/:titleId/soundtracks', addTitleSoundtrack);
 router.get('/:titleId/comments', optionalAuthenticate, getComments);
 router.post('/:titleId/comments', authenticate, addComment);
+router.post('/:titleId/like', authenticate, likeTitle);
 router.post('/comments/:commentId/like', authenticate, likeComment);
 router.get('/comments/:commentId/likers', optionalAuthenticate, getCommentLikers);
 router.get('/comments/:commentId/replies', optionalAuthenticate, getCommentReplies);

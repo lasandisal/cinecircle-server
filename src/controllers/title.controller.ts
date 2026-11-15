@@ -444,7 +444,7 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
                 voteAverage: tmdbData.voteAverage,
                 moodTags: tmdbData.moodTags || [],
                 cast: tmdbData.cast as any,
-                imdbId: tmdbData.imdbId || undefined,
+                imdbId: undefined,
               },
             });
 
@@ -712,9 +712,30 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
       }
     }
 
+    const viewerId = (req as IAuthRequest).user?.id;
+    let isLikedByViewer = false;
+    let titleLikesCount = 0;
+    if (titleObjId) {
+      const [existingLike, realLikesCount] = await Promise.all([
+        viewerId
+          ? prisma.like.findUnique({
+              where: {
+                userId_titleId: {
+                  userId: viewerId,
+                  titleId: titleObjId,
+                },
+              },
+            })
+          : null,
+        prisma.like.count({ where: { titleId: titleObjId } }),
+      ]);
+      isLikedByViewer = !!existingLike;
+      titleLikesCount = realLikesCount;
+    }
+
     const commentsWithReplies = groupCommentsForDisplay(
       allComments,
-      (req as IAuthRequest).user?.id
+      viewerId
     );
 
     const communityWatchers = (watcherDocs || [])
@@ -731,6 +752,8 @@ export const getTitleDetails = async (req: IAuthRequest, res: Response, next: Ne
 
     const fullDetail = {
       ...formatTitle(title),
+      likesCount: titleLikesCount,
+      isLiked: isLikedByViewer,
       watchProviders: watchProviders.map((wp) => ({ ...wp, _id: wp.id })),
       seasons: seasons.map((s) => ({ ...s, _id: s.id })),
       soundtracks: finalSoundtracks.map((st: any) => ({ ...st, _id: st.id })),
@@ -989,12 +1012,93 @@ export const getComments = async (req: IAuthRequest, res: Response, next: NextFu
         where: { userId: viewerId, commentId: { in: commentIds } },
         select: { commentId: true },
       });
-      likedCommentIds = new Set(likes.map((l) => l.commentId));
+      likedCommentIds = new Set(
+        likes
+          .map((l) => l.commentId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      );
     }
 
     const commentsWithReplies = groupCommentsForDisplay(allComments, viewerId, likedCommentIds);
 
     sendSuccess(res, { comments: commentsWithReplies }, 'Comments retrieved');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Toggle like on a title (like if not liked, unlike if already liked).
+ * POST /api/titles/:titleId/like
+ */
+export const likeTitle = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const titleIdParam = String(req.params.titleId);
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    let title: any = null;
+    if (!/^\d+$/.test(titleIdParam)) {
+      title = await prisma.title.findUnique({ where: { id: titleIdParam } });
+    } else {
+      const tmdbIdNum = parseInt(titleIdParam, 10);
+      if (!isNaN(tmdbIdNum)) {
+        title = await prisma.title.findFirst({ where: { tmdbId: tmdbIdNum } });
+      }
+    }
+
+    if (!title) {
+      res.status(404).json({ success: false, error: 'Title not found' });
+      return;
+    }
+
+    const titleId = title.id;
+    const existingLike = await prisma.like.findUnique({
+      where: {
+        userId_titleId: {
+          userId,
+          titleId,
+        },
+      },
+    });
+
+    let isLiked: boolean;
+
+    if (existingLike) {
+      // Unlike: remove the like record and decrement count
+      await prisma.$transaction([
+        prisma.like.delete({
+          where: { id: existingLike.id },
+        }),
+        prisma.title.update({
+          where: { id: titleId },
+          data: { likesCount: { decrement: 1 } },
+        }),
+      ]);
+      isLiked = false;
+    } else {
+      // Like: create the like record and increment count
+      await prisma.$transaction([
+        prisma.like.create({
+          data: { userId, titleId },
+        }),
+        prisma.title.update({
+          where: { id: titleId },
+          data: { likesCount: { increment: 1 } },
+        }),
+      ]);
+      isLiked = true;
+    }
+
+    const likesCount = await prisma.like.count({ where: { titleId } });
+
+    sendSuccess(
+      res,
+      { titleId, isLiked, likesCount },
+      isLiked ? 'Title liked' : 'Title unliked'
+    );
   } catch (error) {
     next(error);
   }
@@ -1513,7 +1617,9 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
         where: { userId: req.user.id, commentId: { in: feedCommentIds } },
         select: { commentId: true },
       });
-      myFeedLikes.forEach((l) => myLikedFeedCommentIds.add(l.commentId));
+      myFeedLikes.forEach((l) => {
+        if (l.commentId) myLikedFeedCommentIds.add(l.commentId);
+      });
     }
 
     const visibleComments = comments.filter((c) => c.title != null && c.user != null);
