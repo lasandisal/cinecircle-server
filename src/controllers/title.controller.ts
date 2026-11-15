@@ -954,6 +954,24 @@ export const addComment = async (req: IAuthRequest, res: Response, next: NextFun
 
     const rating = req.body.rating ? Number(req.body.rating) : undefined;
 
+    // A reply must point at a parent comment that lives on the SAME title.
+    // Without this check a client could attach a reply to a comment from a
+    // different title, which would render it under the wrong film.
+    if (parentId) {
+      const parent = await prisma.comment.findUnique({
+        where: { id: String(parentId) },
+        select: { id: true, titleId: true, parentId: true },
+      });
+      if (!parent) {
+        res.status(404).json({ success: false, error: 'Parent comment not found' });
+        return;
+      }
+      if (parent.titleId !== title.id) {
+        res.status(400).json({ success: false, error: 'Parent comment belongs to a different title' });
+        return;
+      }
+    }
+
     let pollData: any = undefined;
     if (poll && poll.question && Array.isArray(poll.options) && poll.options.length >= 2) {
       pollData = {
@@ -1622,6 +1640,19 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
       });
     }
 
+    // Fetch actual like counts for all feed comments (from Like table, not stored field)
+    const feedLikeCountsMap = new Map<string, number>();
+    if (feedCommentIds.length > 0) {
+      const likeCounts = await prisma.like.groupBy({
+        by: ['commentId'],
+        where: { commentId: { in: feedCommentIds } },
+        _count: { commentId: true },
+      });
+      likeCounts.forEach((lc) => {
+        if (lc.commentId) feedLikeCountsMap.set(lc.commentId, lc._count.commentId);
+      });
+    }
+
     const visibleComments = comments.filter((c) => c.title != null && c.user != null);
 
     const posts = visibleComments.map((c) => {
@@ -1654,7 +1685,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
         rating: typeof c.rating === 'number' ? c.rating : null,
         reviewText: c.text,
         timestamp: formatRelativeTime(c.createdAt),
-        likesCount: c.likesCount || 0,
+        likesCount: feedLikeCountsMap.get(c.id) || 0,
         commentsCount: repliesByParent.get(c.id) || 0,
         poll: poll?.question
           ? {
