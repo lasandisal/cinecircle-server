@@ -598,10 +598,19 @@ export const getUserSuggestions = async (req: IAuthRequest, res: Response, next:
         avatar: u.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=${idx % 2 === 0 ? '6366f1' : '8b5cf6'}&color=fff`,
         matchScore: compat?.score ?? null,
         matchExplanation: compat?.explanation || '',
+        /**
+         * Why there is (or is not) a percentage.
+         * 'none' = not enough shared history to be honest about a match,
+         * so the UI must not imply one.
+         */
+        matchBasis: compat?.basis || 'none',
         mutualCount: compat?.mutualWatchedCount ?? 0,
       };
     });
 
+    // Members we can actually score come first; unscored ones (not enough
+    // shared history yet) are still listed so the section doubles as a
+    // "people to connect" directory.
     matches.sort((a, b) => (b.matchScore ?? -1) - (a.matchScore ?? -1));
 
     sendSuccess(res, { users: matches }, 'User suggestions retrieved');
