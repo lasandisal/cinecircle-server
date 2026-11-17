@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { CookieOptions, Response } from 'express';
 import { ENV } from '../config/env';
 
 /**
@@ -11,8 +11,11 @@ import { ENV } from '../config/env';
  * SameSite policy:
  *  - development: `lax` over http://localhost (frontend 5173 -> backend 5000
  *    is same-site, different port).
- *  - production: `none` + `secure`, because the client and server live on
- *    different registrable domains (vercel.app is on the public suffix list).
+ *  - production: `none` + `secure` + `partitioned`. vercel.app is on the
+ *    public suffix list, so client and server are cross-site. `partitioned`
+ *    (CHIPS) lets Chrome keep the cookie when the request is still cross-origin
+ *    (Socket.IO). Same-origin `/api` rewrites on the frontend make the cookie
+ *    first-party for REST.
  */
 
 const DURATION_UNITS: Record<string, number> = {
@@ -34,12 +37,17 @@ export const parseDurationMs = (value: string | undefined, fallbackMs: number): 
 
 const isProduction = (): boolean => ENV.NODE_ENV === 'production';
 
-const baseCookieOptions = () => ({
-  httpOnly: true,
-  secure: isProduction(),
-  sameSite: (isProduction() ? 'none' : 'lax') as 'none' | 'lax',
-  path: '/',
-});
+const baseCookieOptions = (): CookieOptions => {
+  const production = isProduction();
+  return {
+    httpOnly: true,
+    secure: production,
+    sameSite: production ? 'none' : 'lax',
+    path: '/',
+    // CHIPS: required for Chrome to accept a cross-site session cookie.
+    ...(production ? { partitioned: true } : {}),
+  };
+};
 
 export const AUTH_COOKIE_NAME = ENV.AUTH_COOKIE_NAME;
 
