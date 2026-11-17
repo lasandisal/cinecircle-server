@@ -7,6 +7,9 @@ import { IAuthRequest } from '../types';
 import { AppError } from '../middleware/error.middleware';
 import { sendSuccess } from '../utils/response';
 import { EmailService } from '../services/email.service';
+import { clearAuthCookie, setAuthCookie } from '../utils/authCookie';
+
+const MAX_OTP_ATTEMPTS = 5;
 
 /**
  * Generate JWT token helper
@@ -15,6 +18,18 @@ const generateToken = (id: string, email: string, role: string): string => {
   return jwt.sign({ id, email, role }, ENV.JWT_SECRET, {
     expiresIn: (ENV.JWT_EXPIRES_IN || '7d') as any,
   });
+};
+
+/**
+ * A code is unusable when it has no expiry (legacy row) or the expiry passed.
+ */
+const isOtpExpired = (record: { expiresAt: Date | null }): boolean =>
+  !record.expiresAt || record.expiresAt.getTime() <= Date.now();
+
+const otpExpiryDate = (): Date => new Date(Date.now() + ENV.OTP_TTL_MINUTES * 60_000);
+
+const deleteOtpsForEmail = async (email: string): Promise<void> => {
+  await prisma.otp.deleteMany({ where: { email } });
 };
 
 /**
@@ -75,6 +90,15 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
       }
     }
 
+    // Drop codes that are already past their hard expiry (legacy rows with no
+    // expiresAt included) so they can neither be used nor trigger the cooldown.
+    await prisma.otp.deleteMany({
+      where: {
+        email: cleanEmail,
+        OR: [{ expiresAt: null }, { expiresAt: { lt: new Date() } }],
+      },
+    });
+
     // Rate limiting: enforce a 30s cooldown between code dispatches
     const existingOtp = await prisma.otp.findFirst({
       where: { email: cleanEmail },
@@ -95,7 +119,7 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
     const otpHash = await bcrypt.hash(plainOtp, salt);
 
     // Clean previous codes for this email and insert new code
-    await prisma.otp.deleteMany({ where: { email: cleanEmail } });
+    await deleteOtpsForEmail(cleanEmail);
     await prisma.otp.create({
       data: {
         email: cleanEmail,
@@ -103,6 +127,7 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
         type,
         verified: false,
         attempts: 0,
+        expiresAt: otpExpiryDate(),
       },
     });
 
@@ -113,6 +138,7 @@ export const sendOtp = async (req: Request, res: Response, next: NextFunction): 
       {
         email: cleanEmail,
         type,
+        expiresInMinutes: ENV.OTP_TTL_MINUTES,
         devCode: emailResult.devCode,
       },
       'Verification code sent successfully to your email.'
@@ -146,8 +172,13 @@ export const verifyOtp = async (req: Request, res: Response, next: NextFunction)
       );
     }
 
-    if (record.attempts >= 5) {
-      await prisma.otp.deleteMany({ where: { email: cleanEmail } });
+    if (isOtpExpired(record)) {
+      await deleteOtpsForEmail(cleanEmail);
+      return next(new AppError('Verification code has expired. Please request a new code.', 400));
+    }
+
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+      await deleteOtpsForEmail(cleanEmail);
       return next(new AppError('Too many failed attempts. Please request a new verification code.', 429));
     }
 
@@ -209,9 +240,25 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return next(new AppError('Email verification required. Please request a verification code.', 400));
     }
 
+    if (isOtpExpired(otpRecord)) {
+      await deleteOtpsForEmail(cleanEmail);
+      return next(new AppError('Verification code has expired. Please request a new code.', 400));
+    }
+
+    if (otpRecord.attempts >= MAX_OTP_ATTEMPTS) {
+      await deleteOtpsForEmail(cleanEmail);
+      return next(new AppError('Too many failed attempts. Please request a new verification code.', 429));
+    }
+
     let isOtpValid = otpRecord.verified;
     if (!isOtpValid && otp) {
       isOtpValid = await bcrypt.compare(String(otp).trim(), otpRecord.otpHash);
+      if (!isOtpValid) {
+        await prisma.otp.update({
+          where: { id: otpRecord.id },
+          data: { attempts: otpRecord.attempts + 1 },
+        });
+      }
     }
 
     if (!isOtpValid) {
@@ -219,7 +266,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     }
 
     // Clean up OTP record upon successful registration
-    await prisma.otp.deleteMany({ where: { email: cleanEmail } });
+    await deleteOtpsForEmail(cleanEmail);
 
     // Hash password with bcryptjs
     const salt = await bcrypt.genSalt(10);
@@ -249,12 +296,12 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     });
 
     const token = generateToken(user.id, user.email, user.role);
+    setAuthCookie(res, token);
 
     sendSuccess(
       res,
       {
         user: formatUserResponse(user),
-        token,
       },
       'User registered and email verified successfully.',
       201
@@ -296,11 +343,27 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       if (!otpRecord) {
         return next(new AppError('Verification code has expired. Please request a new code.', 400));
       }
+
+      if (isOtpExpired(otpRecord)) {
+        await deleteOtpsForEmail(cleanEmail);
+        return next(new AppError('Verification code has expired. Please request a new code.', 400));
+      }
+
+      if (otpRecord.attempts >= MAX_OTP_ATTEMPTS) {
+        await deleteOtpsForEmail(cleanEmail);
+        return next(new AppError('Too many failed attempts. Please request a new verification code.', 429));
+      }
+
       const isOtpMatch = await bcrypt.compare(String(otp).trim(), otpRecord.otpHash);
       if (!isOtpMatch) {
+        await prisma.otp.update({
+          where: { id: otpRecord.id },
+          data: { attempts: otpRecord.attempts + 1 },
+        });
         return next(new AppError('Invalid verification code.', 400));
       }
-      await prisma.otp.deleteMany({ where: { email: cleanEmail } });
+
+      await deleteOtpsForEmail(cleanEmail);
     } else {
       const isMatch = await bcrypt.compare(password, user.passwordHash);
       if (!isMatch) {
@@ -309,15 +372,28 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     const token = generateToken(user.id, user.email, user.role);
+    setAuthCookie(res, token);
 
     sendSuccess(
       res,
       {
         user: formatUserResponse(user),
-        token,
       },
       'Login successful.'
     );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Clear the session cookie
+ * POST /api/auth/logout
+ */
+export const logout = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    clearAuthCookie(res);
+    sendSuccess(res, {}, 'Logged out successfully.');
   } catch (error) {
     next(error);
   }
@@ -349,7 +425,7 @@ export const getMe = async (req: IAuthRequest, res: Response, next: NextFunction
 };
 
 /**
- * Refresh JWT Token
+ * Refresh JWT Token (re-issues the cookie before it expires)
  * POST /api/auth/refresh
  */
 export const refreshToken = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
@@ -367,8 +443,9 @@ export const refreshToken = async (req: IAuthRequest, res: Response, next: NextF
     }
 
     const newToken = generateToken(user.id, user.email, user.role);
+    setAuthCookie(res, newToken);
 
-    sendSuccess(res, { token: newToken }, 'Token refreshed successfully.');
+    sendSuccess(res, {}, 'Token refreshed successfully.');
   } catch (error) {
     next(error);
   }

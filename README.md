@@ -47,7 +47,9 @@ flowchart TD
 - **Dual Login Modes**:
   1. Standard **Email + Password** (salted bcrypt hashing).
   2. Passwordless **Email OTP** (6-digit one-time code generated and delivered via Brevo SMTP).
-- **Token Authorization**: Stateless JWT (JSON Web Tokens) with 7-day expiry and role-based access control (`user`, `curator`, `admin`).
+- **Token Authorization**: Stateless JWT with 7-day expiry and role-based access control (`user`, `curator`, `admin`). The token is delivered in an **HttpOnly, Secure, SameSite cookie**, so page scripts cannot read it; a Bearer header is still accepted for non-browser clients.
+- **OTP Hardening**: 6-digit codes are bcrypt-hashed, expire after `OTP_TTL_MINUTES` (default 10), are capped at 5 failed attempts, are rate-limited per IP, and enforce a 30s resend cooldown.
+- **API Hardening**: Helmet security headers, per-IP rate limits (global + auth + write) shared across instances through **Upstash Redis** (atomic `INCR`+`PEXPIRE` Lua script, with an automatic in-memory fallback if Redis is unreachable), Origin checks on mutating requests (CSRF defence), Zod request-body validation, and magic-byte image validation for uploads.
 - **Onboarding Pipeline**: New members configure a CineTaste Matrix (favorite genres, seed titles, owned streaming passes).
 
 ### 2.2 Solo Decision Engine & Fatigue Detection
@@ -102,7 +104,7 @@ flowchart TD
 | **Real-Time** | Socket.IO 4.x | Duplex WebSocket connection for watch party rooms |
 | **Artificial Intelligence** | `@google/generative-ai` | Gemini Flash for witty group compromise pitches |
 | **Email Service** | Nodemailer + Brevo SMTP | Reliable delivery of 6-digit registration & login OTP codes |
-| **Authentication** | JWT (`jsonwebtoken`) + `bcryptjs` | Stateless session bearer tokens and secure password hashing |
+| **Authentication** | JWT (`jsonwebtoken`) + `bcryptjs` | HttpOnly session cookies (Bearer fallback) and secure password/OTP hashing |
 | **External APIs** | Axios | TMDB (The Movie Database) for live films, shows, and streaming data |
 | **Dev Tooling** | `tsx` & `typescript` | Instant TypeScript execution with hot-reloading in development |
 
@@ -255,7 +257,17 @@ All routes are prefixed with `/api`.
    NODE_ENV=development
    DATABASE_URL="postgresql://postgres:password@localhost:5432/cinecircle?schema=public"
    JWT_SECRET="generate_a_random_secure_secret_key"
+   JWT_EXPIRES_IN=7d
+   AUTH_COOKIE_NAME=cinecircle_token
+   OTP_TTL_MINUTES=10
    CLIENT_URL="http://localhost:5173"
+   ALLOWED_ORIGINS=""
+   SUPABASE_URL="https://your-project-ref.supabase.co"
+   SUPABASE_SECRET_KEY="your_supabase_secret_key"
+   SUPABASE_STORAGE_BUCKET=cinecircle-images
+   # Optional: shared rate-limit counters (recommended on Vercel)
+   UPSTASH_REDIS_REST_URL=""
+   UPSTASH_REDIS_REST_TOKEN=""
    TMDB_API_KEY="your_tmdb_api_key"
    TMDB_ACCESS_TOKEN="your_tmdb_access_token"
    GEMINI_API_KEY="your_gemini_api_key"

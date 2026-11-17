@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 
 export class AppError extends Error {
   statusCode: number;
@@ -20,6 +21,15 @@ export const errorHandler = (
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   next: NextFunction
 ): void => {
+  if (err instanceof multer.MulterError) {
+    const isTooLarge = err.code === 'LIMIT_FILE_SIZE';
+    res.status(isTooLarge ? 413 : 400).json({
+      success: false,
+      error: isTooLarge ? 'Image must be 5 MB or smaller.' : 'Invalid file upload.',
+    });
+    return;
+  }
+
   const statusCode = err instanceof AppError ? err.statusCode : 500;
   const message = err.message || 'Internal Server Error';
 

@@ -44,7 +44,27 @@ export const ENV = {
     INSECURE_DEFAULTS
   ),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
+  /** Minutes a one-time email code stays valid. */
+  OTP_TTL_MINUTES: Math.max(1, parseInt(process.env.OTP_TTL_MINUTES || '10', 10) || 10),
+  /** Name of the HttpOnly session cookie. */
+  AUTH_COOKIE_NAME: process.env.AUTH_COOKIE_NAME || 'cinecircle_token',
+  /** Extra frame/API origins beyond CLIENT_URL (comma separated, e.g. preview deploys). */
+  ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
+  SUPABASE_URL: process.env.SUPABASE_URL || '',
+  SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY || '',
+  SUPABASE_STORAGE_BUCKET: process.env.SUPABASE_STORAGE_BUCKET || 'cinecircle-images',
+  // Shared rate-limit counters (Upstash Redis REST API). Optional: when empty
+  // the limiters fall back to express-rate-limit's in-process MemoryStore.
+  // KV_REST_API_* is what the Vercel Upstash integration sets, so both names
+  // are accepted.
+  UPSTASH_REDIS_REST_URL:
+    process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '',
+  UPSTASH_REDIS_REST_TOKEN:
+    process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '',
   TMDB_API_KEY: process.env.TMDB_API_KEY || '',
   TMDB_ACCESS_TOKEN: process.env.TMDB_ACCESS_TOKEN || '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',

@@ -1,44 +1,35 @@
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import apiRouter from './routes';
 import { errorHandler } from './middleware/error.middleware';
-import { ENV } from './config/env';
+import { isAllowedOrigin } from './config/cors';
+import { requireTrustedOrigin } from './middleware/origin.middleware';
+import { apiLimiter } from './middleware/rateLimit.middleware';
 
 // Create the Express application instance
 const app: Application = express();
-
-export const isAllowedOrigin = (origin: string | undefined): boolean => {
-  if (!origin) return true;
-  // Local development servers may bind any port (5173, 5174, ...).
-  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-    return true;
-  }
-  if (
-    origin === 'http://localhost:5173' ||
-    origin === 'http://localhost:5000' ||
-    origin === 'https://cinecircle-client.vercel.app'
-  ) {
-    return true;
-  }
-  if (ENV.CLIENT_URL && origin === ENV.CLIENT_URL) {
-    return true;
-  }
-  if (origin.endsWith('.vercel.app')) {
-    return true;
-  }
-  return false;
-};
 
 /**
  * ==========================================
  * GLOBAL MIDDLEWARE CONFIGURATION
  * ==========================================
- * Setup security, cross-origin resource sharing, and body parsers.
  */
 
-/**
- * Enable CORS with credentials support for frontend client URLs
- */
+// Running behind Vercel's proxy: trust exactly one hop so rate limiting and
+// `req.ip` see the real client address from X-Forwarded-For.
+app.set('trust proxy', 1);
+
+// Security headers. CORP is opened up for the API because the frontend is a
+// different origin; CSP/COOP/HSTS still apply as helmet defaults.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
+// CORS for the allow-listed client origins only. `credentials` is required so
+// the browser stores and sends the HttpOnly session cookie.
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -51,28 +42,23 @@ app.use(
   })
 );
 
-// Parse incoming requests with JSON payloads (e.g., req.body)
-app.use(express.json());
+// Reject mutating requests that a foreign page forged (CSRF defence for
+// cookie-based sessions).
+app.use(requireTrustedOrigin);
+
+// Parse incoming requests with JSON payloads (e.g., req.body).
+// 100kb is far more than any endpoint needs and caps abuse.
+app.use(express.json({ limit: '100kb' }));
 
 // Parse incoming requests with url-encoded payloads (form data)
-app.use(express.urlencoded({ extended: true }));
-
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 /**
  * ==========================================
  * APPLICATION ROUTES
  * ==========================================
- * Define basic root checks and mount feature-specific routers.
  */
 
-/**
- * http://localhost:5000/
- * 
- * GET / HTTP/1.1
- * Host: localhost:5000
- * User-Agent: Mozilla/5.0 (Windows NT...)
- * Accept: application/json
- */
 // Root health-check / welcome route
 app.get('/', (req: Request, res: Response) => {
   res.json({
@@ -81,11 +67,9 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-
-
-// Mount all main API routes under the '/api' prefix
-app.use('/api', apiRouter);
-
+// Mount all main API routes under the '/api' prefix, behind a broad backstop
+// limiter. Individual routers add stricter limits where it matters.
+app.use('/api', apiLimiter, apiRouter);
 
 /**
  * ==========================================

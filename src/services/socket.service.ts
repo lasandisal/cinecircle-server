@@ -1,6 +1,7 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { ENV } from '../config/env';
+import { readTokenFromCookieHeader } from '../utils/authCookie';
 import { SessionService, SessionServiceError } from './session.service';
 
 /**
@@ -161,11 +162,15 @@ export class SocketService {
 
   /**
    * AUTHENTICATION MIDDLEWARE
-   * Intercepts incoming socket connections to verify the JWT token 
-   * passed in auth headers or query strings.
+   * Intercepts incoming socket connections to verify the JWT.
+   *
+   * Browsers send the HttpOnly session cookie on the WebSocket handshake, so
+   * page scripts never need to hold the token. `auth.token` and `?token=`
+   * remain supported for non-browser clients.
    */
   private static authMiddleware(socket: Socket, next: (err?: Error) => void): void {
     const token =
+      readTokenFromCookieHeader(socket.handshake.headers.cookie) ||
       socket.handshake.auth?.token ||
       (typeof socket.handshake.query?.token === 'string' ? socket.handshake.query.token : undefined);
 

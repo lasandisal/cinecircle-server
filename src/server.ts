@@ -1,10 +1,12 @@
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import app, { isAllowedOrigin } from './app';
+import app from './app';
 import { ENV } from './config/env';
+import { isAllowedOrigin } from './config/cors';
 import prisma from './config/prisma';
 import { SocketService } from './services/socket.service';
 import { SeedService } from './services/seed.service';
+import { rateLimitStoreKind } from './middleware/rateLimit.middleware';
 
 
 /**
@@ -59,6 +61,13 @@ const startServer = async (): Promise<void> => {
     server.listen(ENV.PORT, () => {
       console.log(`[Server] CineCircle Backend is running on http://localhost:${ENV.PORT}`);
       console.log(`[Server] Environment: ${ENV.NODE_ENV}`);
+      console.log(
+        `[Server] Rate limiting store: ${
+          rateLimitStoreKind === 'redis'
+            ? 'Upstash Redis (shared across instances)'
+            : 'in-process memory (per instance)'
+        }`
+      );
     });
   } catch (error) {
     console.error('[Server] Initialization error during startup:', error);

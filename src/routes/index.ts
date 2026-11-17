@@ -7,6 +7,7 @@ import sessionRoutes from './session.routes';
 import watchlistRoutes from './watchlist.routes';
 import curatorRoutes from './curator.routes';
 import aiRoutes from './ai.routes';
+import { rateLimitStoreKind } from '../middleware/rateLimit.middleware';
 
 const apiRouter = Router();
 
@@ -15,6 +16,8 @@ apiRouter.get('/health', (req, res) => {
     status: 'ok',
     service: 'CineCircle Backend API',
     timestamp: new Date().toISOString(),
+    // "redis" = limits are shared by every instance; "memory" = local only.
+    rateLimitStore: rateLimitStoreKind,
   });
 });
 

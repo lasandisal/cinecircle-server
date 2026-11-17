@@ -7,6 +7,8 @@ import { CompatibilityService } from '../services/compatibility.service';
 import { RecommendationService } from '../services/recommendation.service';
 import { ConnectionGraphService } from '../services/connection-graph.service';
 import { ConnectionError, ConnectionService } from '../services/connection.service';
+import { detectImageType } from '../utils/image';
+import { uploadImage } from '../services/storage.service';
 
 /**
  * Redact a user document for someone who is not the owner.
@@ -284,6 +286,48 @@ export const updateProfile = async (req: IAuthRequest, res: Response, next: Next
       },
       'Profile updated successfully'
     );
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Upload a profile image.
+ * POST /api/users/avatar  (multipart/form-data, field name "avatar")
+ *
+ * The file is validated on the server before it reaches storage: multer caps
+ * the size, and the magic bytes must match JPEG/PNG/WebP/GIF. The browser's
+ * claimed MIME type and filename are never trusted.
+ */
+export const uploadAvatar = async (
+  req: IAuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new AppError('Unauthorized', 401));
+    }
+
+    if (!req.file) {
+      return next(new AppError('Please choose an image file.', 400));
+    }
+
+    if (!req.file.buffer || req.file.buffer.length === 0) {
+      return next(new AppError('The uploaded file is empty.', 400));
+    }
+
+    const detected = detectImageType(req.file.buffer);
+    if (!detected) {
+      return next(
+        new AppError('Unsupported image. Please upload a JPEG, PNG, WebP or GIF file.', 415)
+      );
+    }
+
+    const url = await uploadImage(userId, req.file.buffer, detected.mime, detected.ext);
+
+    sendSuccess(res, { url }, 'Profile image uploaded successfully.', 201);
   } catch (error) {
     next(error);
   }
@@ -678,7 +722,8 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
         detail: `Room Code: #${s.joinCode} • ${s.participants.length} participant(s)`,
         timestamp: s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Recent',
         read: false,
-        actionUrl: `/group`,
+        joinCode: s.joinCode,
+        actionUrl: `/group?code=${s.joinCode}`,
         actionText: 'Enter Room',
         createdAt: s.createdAt,
       });
@@ -710,6 +755,8 @@ export const getNotifications = async (req: IAuthRequest, res: Response, next: N
         detail: invitation.inviter.handle || `Room Code: #${invitation.session.joinCode}`,
         timestamp: invitation.createdAt ? new Date(invitation.createdAt).toLocaleDateString() : 'Recent',
         read: false,
+        joinCode: invitation.session.joinCode,
+        actionUrl: `/group?code=${invitation.session.joinCode}`,
         actionText: 'Accept Invitation',
         createdAt: invitation.createdAt,
       });

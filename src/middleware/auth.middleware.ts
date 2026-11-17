@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { ENV } from '../config/env';
 import { IAuthRequest, UserRole } from '../types';
 import { AppError } from './error.middleware';
+import { readTokenFromAuthHeader, readTokenFromCookieHeader } from '../utils/authCookie';
 
 interface JwtPayload {
   id: string;
@@ -11,17 +12,24 @@ interface JwtPayload {
 }
 
 /**
+ * The session token travels in an HttpOnly cookie, so JavaScript (and any
+ * XSS payload) cannot read it. The Authorization header is still accepted for
+ * non-browser clients such as scripts, mobile shells and Postman.
+ */
+const extractToken = (req: IAuthRequest): string | undefined =>
+  readTokenFromCookieHeader(req.headers.cookie) ??
+  readTokenFromAuthHeader(req.headers.authorization);
+
+/**
  * Authentication Middleware
- * Extracts and verifies JWT from the Authorization header.
+ * Extracts and verifies the JWT from the session cookie or Authorization header.
  */
 export const authenticate = (req: IAuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
+  const token = extractToken(req);
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     return next(new AppError('Authentication required. No token provided.', 401));
   }
-
-  const token = authHeader.split(' ')[1];
 
   try {
     const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
@@ -44,12 +52,11 @@ export const authenticate = (req: IAuthRequest, res: Response, next: NextFunctio
  * Populates req.user if a valid token is provided, but does not block guests.
  */
 export const optionalAuthenticate = (req: IAuthRequest, res: Response, next: NextFunction): void => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = extractToken(req);
+  if (!token) {
     return next();
   }
 
-  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, ENV.JWT_SECRET) as JwtPayload;
     req.user = {
