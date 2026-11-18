@@ -216,6 +216,24 @@ export const respondToConnection = async (req: IAuthRequest, res: Response, next
 };
 
 /**
+ * Remove an accepted connection.
+ * DELETE /api/users/connections/:targetUserId
+ */
+export const removeConnection = async (req: IAuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const targetUserId =
+      typeof req.params.targetUserId === 'string' ? req.params.targetUserId : '';
+    if (!req.user?.id || !targetUserId) {
+      return next(new AppError('targetUserId is required', 400));
+    }
+    await ConnectionService.disconnect(req.user.id, targetUserId);
+    sendSuccess(res, { status: 'none' }, 'Connection removed');
+  } catch (error: any) {
+    next(error instanceof ConnectionError ? new AppError(error.message, error.statusCode) : error);
+  }
+};
+
+/**
  * Edit user profile details (Name, Bio, Handle, Avatar)
  * PUT /api/users/profile
  */
@@ -368,18 +386,23 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
         role: true,
         subscribedServices: true,
         createdAt: true,
+        // Circles = sessions this member belongs to. The creator is connected
+        // as a participant when a session is created, so this one relation
+        // count covers both hosted and joined rooms.
+        _count: { select: { joinedSessions: true } },
       },
       take: 20,
     });
 
     const userIds = users.map((u) => u.id);
-    const [watchedRows, compatByUser] = await Promise.all([
+    const [watchedRows, compatByUser, connectionStatuses] = await Promise.all([
       prisma.watchlist.groupBy({
         by: ['userId'],
         where: { userId: { in: userIds }, watched: true },
         _count: { titleId: true },
       }),
       CompatibilityService.computeBatch(currentUserId, userIds),
+      ConnectionService.getStatusMap(currentUserId, userIds),
     ]);
 
     const watchedMap = new Map(watchedRows.map((r) => [r.userId, r._count.titleId]));
@@ -399,11 +422,13 @@ export const searchPeople = async (req: IAuthRequest, res: Response, next: NextF
         role: u.role,
         stats: {
           watchedCount: watchedMap.get(id) || 0,
-          circlesCount: 0,
+          circlesCount: u._count.joinedSessions,
         },
         matchScore: compat?.score ?? null,
         matchExplanation: compat?.explanation || '',
         mutualWatchedCount: compat?.mutualWatchedCount ?? 0,
+        connectionStatus: connectionStatuses.get(id)?.status || 'none',
+        connectionRequestId: connectionStatuses.get(id)?.requestId,
       };
     });
 

@@ -1666,6 +1666,7 @@ export const getFeedActivity = async (req: IAuthRequest, res: Response, next: Ne
         _id: c.id,
         likedByMe: myLikedFeedCommentIds.has(c.id),
         author: {
+          id: c.userId,
           name: authorName,
           handle: rawHandle,
           avatar: c.user?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(authorName)}&background=6366f1&color=fff`,

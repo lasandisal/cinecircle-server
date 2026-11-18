@@ -14,6 +14,7 @@ import {
   getNotifications,
   requestConnection,
   respondToConnection,
+  removeConnection,
 } from '../controllers/user.controller';
 import { authenticate, optionalAuthenticate } from '../middleware/auth.middleware';
 import { validateBody } from '../middleware/validate.middleware';
@@ -45,5 +46,6 @@ router.put('/subscribed-services', authenticate, updateSubscribedServices);
 router.post('/onboarding', authenticate, completeOnboarding);
 router.post('/connections/request', authenticate, requestConnection);
 router.post('/connections/respond', authenticate, respondToConnection);
+router.delete('/connections/:targetUserId', authenticate, removeConnection);
 
 export default router;

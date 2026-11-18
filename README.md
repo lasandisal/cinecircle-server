@@ -298,10 +298,13 @@ All routes are prefixed with `/api`.
 - `GET /api/watchlist` — Retrieve authenticated user's watchlist with filtering.
 - `POST /api/watchlist` — Add title to watchlist or update rating.
 - `DELETE /api/watchlist/:id` — Remove item from watchlist.
-- `GET /api/users/search?q=...` — Search community members by name, email, or handle.
+- `GET /api/users/search?q=...` — Search community members by name, email, or handle. Each result also carries the viewer-relative `connectionStatus` (`none`, `pending_sent`, `pending_received`, `accepted`) and `connectionRequestId`, so the directory can render Connect, Accept, Pending, or Disconnect without a request per row.
 - `GET /api/users/:userId/profile` — View user profile, badges, and mutual-watched compatibility.
 - `POST /api/users/:userId/follow` — Follow or unfollow a community member.
 - `GET /api/users/:userId/connections` — Fetch user's social connection graph.
+- `POST /api/users/connections/request` — Send a connection request to another member.
+- `POST /api/users/connections/respond` — Accept or reject a pending request; the sender receives a stored notification of the decision.
+- `DELETE /api/users/connections/:targetUserId` — Remove an accepted connection. Only one of the two connected members can remove it, and the other member receives a notification.
 
 ### 7.7 Curator & Admin (`/api/curator`)
 - `POST /api/curator/sync-tmdb` — Synchronize catalog with TMDB popular titles.
