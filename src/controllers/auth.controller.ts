@@ -298,6 +298,11 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     const token = generateToken(user.id, user.email, user.role);
     setAuthCookie(res, token);
 
+    // 1-time Welcome & Quick-Start email (asynchronous fire-and-forget so registration is instantaneous)
+    EmailService.sendWelcomeEmail(cleanEmail, user.name).catch((err) => {
+      console.warn('[register] Non-blocking welcome email error:', err?.message);
+    });
+
     sendSuccess(
       res,
       {

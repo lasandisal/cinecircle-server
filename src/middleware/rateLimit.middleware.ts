@@ -164,16 +164,42 @@ const createLimiter = (name: string, windowMs: number, limit: number) => {
 };
 
 /** Broad backstop for the whole API. */
+
+/**
+ * General API protection:
+ * Allows a maximum of 600 requests per IP address
+ * within 15 minutes.
+ */
 export const apiLimiter = createLimiter('api', 15 * 60 * 1000, 600);
 
-/** Login / register / refresh. Slows credential stuffing. */
+/**
+ * Authentication protection:
+ * Allows a maximum of 20 requests per IP address
+ * within 15 minutes.
+ * Applied to login, registration and token refresh.
+ */
 export const authLimiter = createLimiter('auth', 15 * 60 * 1000, 20);
 
-/** Requesting a code sends an email, so keep it tight (on top of the 30s cooldown). */
+/**
+ * OTP sending protection:
+ * Allows a maximum of 5 OTP requests per IP address
+ * within 15 minutes.
+ * Prevents excessive OTP emails.
+ */
 export const otpSendLimiter = createLimiter('otp-send', 15 * 60 * 1000, 5);
 
-/** Brute-forcing a 6-digit code is otherwise cheap. */
+/**
+ * OTP verification protection:
+ * Allows a maximum of 10 verification attempts per IP address
+ * within 15 minutes.
+ * Helps prevent brute-force attacks on 6-digit OTP codes.
+ */
 export const otpVerifyLimiter = createLimiter('otp-verify', 15 * 60 * 1000, 10);
 
-/** Comments, likes, polls, reports. */
+/**
+ * Write operation protection:
+ * Allows a maximum of 60 requests per IP address
+ * within 10 minutes.
+ * Applied to comments, likes, polls and reports.
+ */
 export const writeLimiter = createLimiter('write', 10 * 60 * 1000, 60);
