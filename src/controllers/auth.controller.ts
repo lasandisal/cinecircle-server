@@ -430,6 +430,44 @@ export const getMe = async (req: IAuthRequest, res: Response, next: NextFunction
 };
 
 /**
+ * Short-lived token for the Socket.IO handshake.
+ *
+ * The session cookie is issued to the frontend origin (the `/api` rewrite
+ * keeps REST first-party). The socket server lives on a different vercel.app
+ * host, and a cookie is never sent to another host - so a cookie-authenticated
+ * handshake there fails with "Authentication required". The client exchanges
+ * its HttpOnly cookie for this short-lived token over same-origin REST and
+ * sends it in `auth.token` during the WebSocket handshake.
+ */
+export const issueSocketToken = async (
+  req: IAuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!req.user) {
+      return next(new AppError('Unauthorized.', 401));
+    }
+
+    const expiresInSeconds = 2 * 60 * 60;
+    const token = jwt.sign(
+      {
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.role,
+        scope: 'socket',
+      },
+      ENV.JWT_SECRET,
+      { expiresIn: expiresInSeconds }
+    );
+
+    sendSuccess(res, { token, expiresInSeconds }, 'Socket token issued.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Refresh JWT Token (re-issues the cookie before it expires)
  * POST /api/auth/refresh
  */

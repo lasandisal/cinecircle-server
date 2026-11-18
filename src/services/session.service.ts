@@ -201,7 +201,16 @@ export class SessionService {
       throw new SessionServiceError('Session not found', 404);
     }
     if (session.creatorId !== hostUserId) {
-      throw new SessionServiceError('Only the host can finalize the decision', 403);
+      // Cookie sessions are shared by every tab in a browser. If someone signs
+      // in as another account in a second tab, the first tab still renders the
+      // old user but every request carries the new account's cookie - which is
+      // exactly how a "host" ends up here. Say so instead of a bare 403.
+      const hostName = session.creator?.name || 'the room host';
+      throw new SessionServiceError(
+        `Only ${hostName} can lock this decision. ` +
+          `This browser is signed in as a different account - sign in as the host and try again.`,
+        403
+      );
     }
     if (session.status !== 'open') {
       throw new SessionServiceError('This session has already been finalized', 409);

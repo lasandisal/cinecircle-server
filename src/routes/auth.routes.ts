@@ -5,6 +5,7 @@ import {
   logout,
   getMe,
   refreshToken,
+  issueSocketToken,
   sendOtp,
   verifyOtp,
 } from '../controllers/auth.controller';
@@ -30,6 +31,7 @@ router.post('/register', authLimiter, validateBody(registerSchema), register);
 router.post('/login', authLimiter, validateBody(loginSchema), login);
 router.post('/logout', logout);
 router.get('/me', authenticate, getMe);
+router.get('/socket-token', authenticate, issueSocketToken);
 router.post('/refresh', authenticate, refreshToken);
 
 export default router;
